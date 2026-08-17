@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>LeetGPU Local</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <button class="icon-button mobile-only" id="sidebar-toggle" title="题目列表" aria-label="题目列表">
+          <i data-lucide="panel-left"></i>
+        </button>
+        <div class="brand">
+          <span class="brand-mark"><i data-lucide="cpu"></i></span>
+          <span>LeetGPU Local</span>
+        </div>
+        <div class="system-status" id="system-status">
+          <span class="status-dot"></span>
+          <span class="system-name">检测 GPU</span>
+        </div>
+        <div class="topbar-actions">
+          <span class="queue-state" id="queue-state">空闲</span>
+          <button class="icon-button" id="settings-button" title="设置" aria-label="设置">
+            <i data-lucide="settings"></i>
+          </button>
+          <a class="icon-button" href="/api/challenges" target="_blank" title="API" aria-label="API">
+            <i data-lucide="braces"></i>
+          </a>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar" id="sidebar">
+          <div class="sidebar-head">
+            <label class="search-field">
+              <i data-lucide="search"></i>
+              <input id="challenge-search" type="search" placeholder="搜索题目" autocomplete="off" />
+            </label>
+            <div class="difficulty-filter" role="group" aria-label="难度">
+              <button class="active" data-difficulty="all">全部</button>
+              <button data-difficulty="easy">简单</button>
+              <button data-difficulty="medium">中等</button>
+              <button data-difficulty="hard">困难</button>
+            </div>
+          </div>
+          <nav class="challenge-list" id="challenge-list" aria-label="题目列表"></nav>
+          <div class="sidebar-foot">
+            <span id="challenge-count">0 道题</span>
+            <span>本地题库</span>
+          </div>
+        </aside>
+
+        <main class="main-area">
+          <section class="challenge-bar">
+            <div class="challenge-identity">
+              <div class="challenge-number" id="challenge-number">#</div>
+              <div>
+                <h1 id="challenge-title">加载中</h1>
+                <div class="challenge-meta">
+                  <span class="difficulty-badge" id="difficulty-badge">--</span>
+                  <span id="access-tier">free</span>
+                </div>
+              </div>
+            </div>
+            <div class="language-switch" role="tablist" aria-label="语言">
+              <button class="active" data-language="cuda">CUDA</button>
+              <button data-language="triton">Triton</button>
+              <button data-language="pytorch">PyTorch</button>
+            </div>
+          </section>
+
+          <div class="content-grid">
+            <section class="information-pane">
+              <div class="view-tabs" role="tablist">
+                <button class="active" data-view="problem">
+                  <i data-lucide="file-text"></i><span>题目</span>
+                </button>
+                <button data-view="results">
+                  <i data-lucide="terminal-square"></i><span>运行结果</span>
+                  <span class="tab-indicator" id="result-indicator"></span>
+                </button>
+                <button data-view="leaderboard">
+                  <i data-lucide="trophy"></i><span>排行榜</span>
+                </button>
+              </div>
+
+              <div class="view-content problem-view active" id="problem-view">
+                <article class="problem-body" id="problem-body"></article>
+              </div>
+
+              <div class="view-content results-view" id="results-view">
+                <div class="result-summary" id="result-summary">
+                  <div class="empty-state"><i data-lucide="terminal"></i><span>暂无运行结果</span></div>
+                </div>
+                <div class="metrics-strip hidden" id="metrics-strip"></div>
+                <div class="compiler-panel hidden" id="compiler-panel">
+                  <div class="panel-label">编译器输出</div>
+                  <pre id="compiler-output"></pre>
+                </div>
+                <div class="test-results hidden" id="test-results"></div>
+                <div class="artifact-bar hidden" id="artifact-bar"></div>
+                <pre class="execution-output" id="execution-output"></pre>
+              </div>
+
+              <div class="view-content leaderboard-view" id="leaderboard-view">
+                <div class="leaderboard-toolbar">
+                  <div>
+                    <span class="leaderboard-title">最佳成绩</span>
+                    <span class="leaderboard-subtitle" id="leaderboard-subtitle"></span>
+                  </div>
+                  <select id="leaderboard-language" aria-label="排行榜语言">
+                    <option value="">全部语言</option>
+                    <option value="cuda">CUDA</option>
+                    <option value="triton">Triton</option>
+                    <option value="pytorch">PyTorch</option>
+                  </select>
+                </div>
+                <div class="table-wrap">
+                  <table class="leaderboard-table">
+                    <thead>
+                      <tr>
+                        <th>排名</th>
+                        <th>名称</th>
+                        <th>语言</th>
+                        <th>中位耗时</th>
+                        <th>最佳耗时</th>
+                        <th>提交时间</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="leaderboard-body"></tbody>
+                  </table>
+                </div>
+                <div class="empty-state hidden" id="leaderboard-empty">
+                  <i data-lucide="chart-no-axes-column"></i><span>暂无有效成绩</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="editor-pane">
+              <div class="editor-toolbar">
+                <div class="file-label">
+                  <i data-lucide="file-code-2"></i>
+                  <span id="solution-filename">solution.cu</span>
+                  <span class="draft-state" id="draft-state">starter</span>
+                </div>
+                <div class="editor-actions">
+                  <button class="icon-button" id="undo-code" title="撤销 Ctrl+Z" aria-label="撤销">
+                    <i data-lucide="undo-2"></i>
+                  </button>
+                  <button class="icon-button" id="redo-code" title="重做 Ctrl+Y" aria-label="重做">
+                    <i data-lucide="redo-2"></i>
+                  </button>
+                  <button class="icon-button" id="reset-code" title="恢复 Starter" aria-label="恢复 Starter">
+                    <i data-lucide="rotate-ccw"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="editor-surface">
+                <div class="line-numbers" id="line-numbers" aria-hidden="true">1</div>
+                <textarea
+                  id="code-editor"
+                  aria-label="代码编辑器"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  wrap="off"
+                ></textarea>
+              </div>
+              <div class="submission-bar">
+                <label class="runner-field">
+                  <i data-lucide="user-round"></i>
+                  <input id="runner-name" maxlength="32" value="local" aria-label="排行榜名称" />
+                </label>
+                <label class="profile-toggle">
+                  <input id="profile-enabled" type="checkbox" checked />
+                  <span class="toggle-track"><span></span></span>
+                  <span>Nsight</span>
+                </label>
+                <button class="test-button" id="test-button">
+                  <i data-lucide="flask-conical"></i>
+                  <span>测试</span>
+                </button>
+                <button class="run-button" id="run-button">
+                  <i data-lucide="send"></i>
+                  <span>提交并计分</span>
+                </button>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+
+    <dialog class="modal submission-modal" id="submission-modal">
+      <div class="modal-head">
+        <div>
+          <h2 id="submission-modal-title">提交代码</h2>
+          <span id="submission-modal-meta"></span>
+        </div>
+        <button class="icon-button" data-close-dialog="submission-modal" title="关闭" aria-label="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <pre class="source-preview" id="submission-source"></pre>
+      <div class="modal-actions">
+        <button class="danger-button" id="delete-submission">
+          <i data-lucide="trash-2"></i><span>删除成绩</span>
+        </button>
+        <button class="secondary-button" id="copy-submission">
+          <i data-lucide="copy"></i><span>复制代码</span>
+        </button>
+      </div>
+    </dialog>
+
+    <dialog class="modal settings-modal" id="settings-modal">
+      <div class="modal-head">
+        <div>
+          <h2>本地设置</h2>
+          <span>Nsight Compute</span>
+        </div>
+        <button class="icon-button" data-close-dialog="settings-modal" title="关闭" aria-label="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="settings-body">
+        <label for="ncu-export-dir">NCU 报告保存目录</label>
+        <div class="path-field">
+          <input id="ncu-export-dir" autocomplete="off" />
+          <button class="icon-button" id="pick-ncu-directory" title="选择目录" aria-label="选择目录">
+            <i data-lucide="folder-open"></i>
+          </button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="primary-button" id="save-settings">
+          <i data-lucide="save"></i><span>保存设置</span>
+        </button>
+      </div>
+    </dialog>
+  </body>
+</html>
