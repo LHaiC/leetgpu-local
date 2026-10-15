@@ -39,6 +39,7 @@
     if (ind) {
       ind.textContent = state.enabled ? `-- ${mode.toUpperCase()} --` : "";
       ind.dataset.mode = mode;
+      ind.classList.toggle("on", state.enabled);
     }
     const t = el();
     if (t) t.classList.toggle("vim-normal", state.enabled && mode !== "insert");

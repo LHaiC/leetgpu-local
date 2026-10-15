@@ -179,10 +179,10 @@ function renderAuthState() {
 
 function openAuthModal(mode = "login") {
   session.authMode = mode;
-  elements.authModalTitle.textContent = mode === "login" ? "登录" : "注册";
-  elements.authSubmit.textContent = mode === "login" ? "登录" : "注册";
+  elements.authModalTitle.textContent = I18N.t(mode === "login" ? "auth.login" : "auth.register");
+  elements.authSubmit.textContent = I18N.t(mode === "login" ? "auth.login" : "auth.register");
   elements.authSwitch.textContent =
-    mode === "login" ? "没有账号？注册" : "已有账号？登录";
+    I18N.t(mode === "login" ? "auth.no_account" : "auth.has_account");
   elements.authSwitch.style.display =
     mode === "login" && !session.registrationOpen ? "none" : "";
   elements.authConfirmWrap.classList.toggle("hidden", mode === "login");
@@ -198,7 +198,7 @@ async function submitAuth(event) {
   try {
     if (session.authMode === "register") {
       if (password !== elements.authConfirm.value) {
-        throw new Error("两次输入的密码不一致");
+        throw new Error(I18N.t("auth.passwords_mismatch"));
       }
       await api("/api/auth/register", {
         method: "POST",
@@ -1003,6 +1003,9 @@ async function pollGpu() {
     const data = await api("/api/system/gpu");
     if (!data.available) return;
     elements.gpuWidget.classList.add("loaded");
+    elements.gpuWidget.title =
+      `GPU ${(state.system && state.system.gpu) || "unknown"}\n` +
+      `Util ${data.util_pct}% · VRAM ${data.mem_used_mb}/${data.mem_total_mb} MiB`;
     elements.gpuUtilFill.style.width = data.util_pct + "%";
     elements.gpuUtilLabel.textContent = data.util_pct + "%";
     elements.gpuUtilFill.className =
@@ -1065,6 +1068,7 @@ async function initialize() {
       api("/api/system"),
       api("/api/settings"),
     ]);
+    state.system = system;
     state.settings = settings;
     elements.ncuExportDir.value = settings.ncu_export_dir;
     state.challenges = challengeData.challenges;
@@ -1199,7 +1203,7 @@ elements.announcementForm.addEventListener("submit", async (event) => {
     elements.announcementBody.value = "";
     await loadAdminAnnouncements();
     await loadAnnouncements();
-    toast("公告已发布");
+    toast(I18N.t("admin.publish") + " ✓");
   } catch (error) {
     toast(error.message, "error");
   }
@@ -1266,12 +1270,12 @@ document.querySelectorAll("[data-admin-tab]").forEach((button) => {
 elements.vimToggle.addEventListener("click", () => {
   const on = window.LeetGPUVim && window.LeetGPUVim.toggle();
   elements.vimToggle.classList.toggle("active", !!on);
-  elements.vimMode.classList.toggle("hidden", !on);
+  elements.vimMode.classList.toggle("on", !!on);
   toast(on ? "Vim 模式已开启" : "Vim 模式已关闭");
 });
 if (window.LeetGPUVim && window.LeetGPUVim.enabled) {
   elements.vimToggle.classList.add("active");
-  elements.vimMode.classList.remove("hidden");
+  elements.vimMode.classList.add("on");
 }
 
 initialize();
