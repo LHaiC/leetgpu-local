@@ -28,7 +28,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 LOGGER = logging.getLogger("leetgpu.web")
 LANGUAGES = ("cuda", "triton", "pytorch")
@@ -1189,8 +1189,23 @@ def system_info() -> Dict[str, Any]:
         "memory_mb": int(memory),
     }
 
+
+_GPU_CACHE: Dict[str, Any] = {"at": 0.0, "value": None}
+_GPU_CACHE_LOCK = threading.Lock()
+_GPU_CACHE_TTL = 0.8
+
+
 def gpu_stats() -> Dict[str, Any]:
-    """Live GPU utilization + VRAM for the topbar widget."""
+    """Live GPU utilization + VRAM for the topbar widget.
+
+    Cached for a fraction of a second so N open tabs share a single
+    `nvidia-smi` invocation instead of spawning one process each poll.
+    """
+    now = time.monotonic()
+    with _GPU_CACHE_LOCK:
+        cached = _GPU_CACHE["value"]
+        if cached is not None and now - _GPU_CACHE["at"] < _GPU_CACHE_TTL:
+            return cached
     command = [
         "nvidia-smi",
         "--query-gpu=utilization.gpu,memory.used,memory.total",
@@ -1198,15 +1213,20 @@ def gpu_stats() -> Dict[str, Any]:
     ]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0 or not result.stdout.strip():
-        return {"available": False}
-    util, used, total = [v.strip() for v in result.stdout.splitlines()[0].split(",")]
-    return {
-        "available": True,
-        "util_pct": int(float(util)),
-        "mem_used_mb": int(float(used)),
-        "mem_total_mb": int(float(total)),
-        "mem_pct": round(100 * float(used) / float(total), 1),
-    }
+        value: Dict[str, Any] = {"available": False}
+    else:
+        util, used, total = [v.strip() for v in result.stdout.splitlines()[0].split(",")]
+        value = {
+            "available": True,
+            "util_pct": int(float(util)),
+            "mem_used_mb": int(float(used)),
+            "mem_total_mb": int(float(total)),
+            "mem_pct": round(100 * float(used) / float(total), 1),
+        }
+    with _GPU_CACHE_LOCK:
+        _GPU_CACHE["at"] = now
+        _GPU_CACHE["value"] = value
+    return value
 
 
 class WebApplication:
@@ -1472,11 +1492,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif parsed.path in {"/", "/index.html"}:
                 self.send_file(self.app.web_root / "index.html")
             elif parsed.path.startswith("/static/"):
-                relative = parsed.path.removeprefix("/static/")
-                if "/" in relative or "\\" in relative or relative.startswith("."):
-                    self.send_error_json(HTTPStatus.NOT_FOUND, "Invalid static path")
+                relative = unquote(parsed.path[len("/static/"):])
+                root = self.app.web_root.resolve()
+                target = (root / relative).resolve()
+                # Allow subdirectories (vendor/, …) but never escape web_root.
+                if target != root and root in target.parents and target.is_file():
+                    self.send_file(target)
                 else:
-                    self.send_file(self.app.web_root / relative)
+                    self.send_error_json(HTTPStatus.NOT_FOUND, "Not found")
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Not found")
         except ApiError as exc:

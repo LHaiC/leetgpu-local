@@ -5,7 +5,6 @@ const elements = {
   challengeNumber: document.querySelector("#challenge-number"),
   challengeSearch: document.querySelector("#challenge-search"),
   challengeTitle: document.querySelector("#challenge-title"),
-  codeEditor: document.querySelector("#code-editor"),
   compilerOutput: document.querySelector("#compiler-output"),
   compilerPanel: document.querySelector("#compiler-panel"),
   copySubmission: document.querySelector("#copy-submission"),
@@ -13,15 +12,11 @@ const elements = {
   difficultyBadge: document.querySelector("#difficulty-badge"),
   draftState: document.querySelector("#draft-state"),
   executionOutput: document.querySelector("#execution-output"),
-  highlightCode: document.querySelector("#highlight-code"),
-  highlightLayer: document.querySelector("#highlight-layer"),
-  hintPopup: document.querySelector("#hint-popup"),
   languageSwitch: document.querySelector(".language-switch"),
   leaderboardBody: document.querySelector("#leaderboard-body"),
   leaderboardEmpty: document.querySelector("#leaderboard-empty"),
   leaderboardLanguage: document.querySelector("#leaderboard-language"),
   leaderboardSubtitle: document.querySelector("#leaderboard-subtitle"),
-  lineNumbers: document.querySelector("#line-numbers"),
   metricsStrip: document.querySelector("#metrics-strip"),
   problemBody: document.querySelector("#problem-body"),
   queueState: document.querySelector("#queue-state"),
@@ -102,12 +97,6 @@ const state = {
   pollTimer: null,
   saveTimer: null,
   selectedSubmission: null,
-  editorHistory: {
-    entries: [],
-    index: -1,
-    applying: false,
-    lastRecordedAt: 0,
-  },
 };
 
 const filenames = {
@@ -254,33 +243,9 @@ function currentStarter() {
   return state.detail?.starters?.[state.language] || "";
 }
 
-function updateLineNumbers() {
-  const count = Math.max(1, elements.codeEditor.value.split("\n").length);
-  elements.lineNumbers.textContent = Array.from({ length: count }, (_, index) => index + 1).join(
-    "\n",
-  );
-}
-
-/** Repaint the highlight layer behind the textarea and keep scroll in sync. */
-function updateHighlight() {
-  if (!window.CodeHighlight || !elements.highlightCode) return;
-  elements.highlightCode.innerHTML = window.CodeHighlight.highlight(
-    elements.codeEditor.value,
-    state.language,
-  );
-  syncEditorScroll();
-}
-
-function syncEditorScroll() {
-  const source = elements.codeEditor;
-  elements.highlightLayer.scrollTop = source.scrollTop;
-  elements.highlightLayer.scrollLeft = source.scrollLeft;
-  elements.lineNumbers.scrollTop = source.scrollTop;
-}
-
 function saveDraft() {
-  if (!state.currentKey) return;
-  const source = elements.codeEditor.value;
+  if (!state.currentKey || !editor) return;
+  const source = editor.getValue();
   localStorage.setItem(draftKey(), source);
   elements.draftState.textContent = "saved";
   if (session.user) {
@@ -295,171 +260,37 @@ function saveDraft() {
   }
 }
 
-function editorSnapshot() {
-  return {
-    value: elements.codeEditor.value,
-    start: elements.codeEditor.selectionStart,
-    end: elements.codeEditor.selectionEnd,
-  };
+function updateHistoryButtons() {
+  if (!editor) return;
+  const size = editor.historySize();
+  elements.undoCode.disabled = !size.undo;
+  elements.redoCode.disabled = !size.redo;
 }
 
 function resetEditorHistory() {
-  state.editorHistory.entries = [editorSnapshot()];
-  state.editorHistory.index = 0;
-  state.editorHistory.lastRecordedAt = 0;
+  if (!editor) return;
+  editor.clearHistory();
   updateHistoryButtons();
-}
-
-function recordEditorHistory(forceNew = false) {
-  if (state.editorHistory.applying) return;
-  const snapshot = editorSnapshot();
-  const current = state.editorHistory.entries[state.editorHistory.index];
-  if (current?.value === snapshot.value) return;
-  state.editorHistory.entries = state.editorHistory.entries.slice(
-    0,
-    state.editorHistory.index + 1,
-  );
-  const now = Date.now();
-  const canCoalesce =
-    !forceNew &&
-    state.editorHistory.entries.length > 1 &&
-    now - state.editorHistory.lastRecordedAt < 500;
-  if (canCoalesce) {
-    state.editorHistory.entries[state.editorHistory.index] = snapshot;
-  } else {
-    state.editorHistory.entries.push(snapshot);
-    state.editorHistory.index += 1;
-  }
-  if (state.editorHistory.entries.length > 200) {
-    state.editorHistory.entries.shift();
-    state.editorHistory.index -= 1;
-  }
-  state.editorHistory.lastRecordedAt = now;
-  updateHistoryButtons();
-}
-
-function applyEditorHistory(index) {
-  const snapshot = state.editorHistory.entries[index];
-  if (!snapshot) return;
-  state.editorHistory.applying = true;
-  state.editorHistory.index = index;
-  elements.codeEditor.value = snapshot.value;
-  elements.codeEditor.setSelectionRange(snapshot.start, snapshot.end);
-  state.editorHistory.applying = false;
-  elements.draftState.textContent = "edited";
-  updateLineNumbers();
-  updateHighlight();
-  updateHistoryButtons();
-  clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(saveDraft, 200);
 }
 
 function undoEditor() {
-  if (state.editorHistory.index > 0) applyEditorHistory(state.editorHistory.index - 1);
+  if (editor) editor.undo();
 }
 
 function redoEditor() {
-  if (state.editorHistory.index < state.editorHistory.entries.length - 1) {
-    applyEditorHistory(state.editorHistory.index + 1);
-  }
+  if (editor) editor.redo();
 }
 
-function updateHistoryButtons() {
-  elements.undoCode.disabled = state.editorHistory.index <= 0;
-  elements.redoCode.disabled =
-    state.editorHistory.index < 0 ||
-    state.editorHistory.index >= state.editorHistory.entries.length - 1;
-}
-
-function recordEditorEdit(forceNew = false) {
-  recordEditorHistory(forceNew);
-  updateLineNumbers();
-  updateHighlight();
+function recordEditorEdit() {
+  if (!editor) return;
   elements.draftState.textContent = "edited";
+  updateHistoryButtons();
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(saveDraft, 500);
 }
 
-function mapEditedOffset(offset, changes, affinity) {
-  let delta = 0;
-  for (const change of changes) {
-    const changeEnd = change.index + change.remove;
-    if (offset < change.index || (offset === change.index && affinity === "before")) break;
-    if (offset >= changeEnd) {
-      delta += change.insert.length - change.remove;
-      continue;
-    }
-    return change.index + delta + (affinity === "after" ? change.insert.length : 0);
-  }
-  return offset + delta;
-}
-
 function toggleLineComments() {
-  const editor = elements.codeEditor;
-  const source = editor.value;
-  const selectionStart = editor.selectionStart;
-  const selectionEnd = editor.selectionEnd;
-  const blockStart = source.lastIndexOf("\n", selectionStart - 1) + 1;
-  const effectiveEnd =
-    selectionEnd > selectionStart && source[selectionEnd - 1] === "\n"
-      ? selectionEnd - 1
-      : selectionEnd;
-  const followingNewline = source.indexOf("\n", effectiveEnd);
-  const blockEnd = followingNewline === -1 ? source.length : followingNewline;
-  const block = source.slice(blockStart, blockEnd);
-  const marker = state.language === "cuda" ? "//" : "#";
-  const lines = block.split("\n");
-  const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
-  const markerPattern = new RegExp(`^(\\s*)${marker === "//" ? "\\/\\/" : "#"}( ?)`);
-  const shouldUncomment =
-    nonEmptyLines.length > 0 && nonEmptyLines.every((line) => markerPattern.test(line));
-  const changes = [];
-  let lineOffset = 0;
-
-  for (const line of lines) {
-    if (line.trim().length > 0) {
-      const indentation = line.match(/^\s*/)[0].length;
-      if (shouldUncomment) {
-        const match = line.match(markerPattern);
-        changes.push({
-          index: lineOffset + indentation,
-          remove: marker.length + match[2].length,
-          insert: "",
-        });
-      } else {
-        changes.push({
-          index: lineOffset + indentation,
-          remove: 0,
-          insert: `${marker} `,
-        });
-      }
-    }
-    lineOffset += line.length + 1;
-  }
-
-  if (changes.length === 0) return;
-  let editedBlock = block;
-  for (const change of [...changes].reverse()) {
-    editedBlock =
-      editedBlock.slice(0, change.index) +
-      change.insert +
-      editedBlock.slice(change.index + change.remove);
-  }
-
-  const relativeStart = selectionStart - blockStart;
-  const relativeEnd = selectionEnd - blockStart;
-  const collapsed = selectionStart === selectionEnd;
-  const nextStart = mapEditedOffset(
-    relativeStart,
-    changes,
-    collapsed ? "after" : "before",
-  );
-  const nextEnd = collapsed
-    ? nextStart
-    : mapEditedOffset(relativeEnd, changes, "after");
-  editor.setRangeText(editedBlock, blockStart, blockEnd, "preserve");
-  editor.setSelectionRange(blockStart + nextStart, blockStart + nextEnd);
-  recordEditorEdit(true);
+  if (editor) editor.execCommand("toggleComment");
 }
 
 async function loadCode() {
@@ -474,27 +305,17 @@ async function loadCode() {
     } catch {}
   }
   const source = server ?? local ?? currentStarter();
-  elements.codeEditor.value = source;
+  if (editor) {
+    editor.setValue(source);
+    editor.clearHistory();
+    editor.setCursor({ line: 0, ch: 0 });
+    editor.scrollTo(0, 0);
+  }
   elements.draftState.textContent =
     server !== null ? "server" : local === null ? "starter" : "saved";
   elements.solutionFilename.textContent = filenames[state.language];
-  updateLineNumbers();
-  updateHighlight();
-  elements.codeEditor.scrollTop = 0;
-  elements.lineNumbers.scrollTop = 0;
-  elements.highlightLayer.scrollTop = 0;
-  elements.highlightLayer.scrollLeft = 0;
-  resetEditorHistory();
-  if (hints) hints.close();
+  updateHistoryButtons();
 }
-
-const hints = window.CodeHighlight
-  ? window.CodeHighlight.attachHints(
-      elements.codeEditor,
-      elements.hintPopup,
-      () => state.language,
-    )
-  : null;
 
 function renderChallengeList() {
   const search = elements.challengeSearch.value.trim().toLowerCase();
@@ -577,6 +398,7 @@ function setLanguage(language) {
     const available = state.detail?.starters?.[button.dataset.language] !== null;
     button.disabled = state.detail ? !available : false;
   });
+  if (editorApi) editorApi.setLanguage(language);
   loadCode();
 }
 
@@ -605,11 +427,19 @@ function renderRunning(job) {
   elements.resultSummary.innerHTML = `
     <div class="result-state running">
       <div class="result-state-icon"><i data-lucide="${stateIcon("running")}"></i></div>
-      <div><strong>${escapeHtml(I18N.t(queued ? "job.waiting" : "job.running", { mode: modeWord }))}</strong><span>${escapeHtml(label)}</span></div>
+      <div class="result-state-body">
+        <strong>${escapeHtml(I18N.t(queued ? "job.waiting" : "job.running", { mode: modeWord }))}</strong>
+        <span>${escapeHtml(label)}</span>
+      </div>
+      <div class="progress-track" role="progressbar" aria-busy="true">
+        <div class="progress-bar"></div>
+      </div>
     </div>`;
+  elements.executionOutput.classList.add("streaming");
   elements.executionOutput.textContent = job.output || "";
   elements.executionOutput.scrollTop = elements.executionOutput.scrollHeight;
   elements.queueState.textContent = queued ? label : I18N.t("job.running", { mode: modeWord });
+  elements.queueState.classList.add("busy");
   elements.resultIndicator.classList.add("visible");
   refreshIcons();
 }
@@ -747,6 +577,8 @@ function renderCompleted(job) {
   elements.artifactBar.classList.remove("hidden");
   elements.executionOutput.textContent = job.output || "";
   elements.queueState.textContent = I18N.t("nav.idle");
+  elements.queueState.classList.remove("busy");
+  elements.executionOutput.classList.remove("streaming");
   elements.runButton.disabled = false;
   elements.testButton.disabled = false;
   elements.resultIndicator.classList.remove("visible");
@@ -775,7 +607,7 @@ async function pollJob(jobId) {
 }
 
 async function submitRun(mode) {
-  if (!state.currentKey || !elements.codeEditor.value.trim()) return;
+  if (!state.currentKey || !editor || !editor.getValue().trim()) return;
   elements.runButton.disabled = true;
   elements.testButton.disabled = true;
   localStorage.setItem("leetgpu.runner", elements.runnerName.value.trim() || "local");
@@ -791,7 +623,7 @@ async function submitRun(mode) {
       body: JSON.stringify({
         challenge: state.currentKey,
         language: state.language,
-        source: elements.codeEditor.value,
+        source: editor.getValue(),
         runner_name: elements.runnerName.value,
         mode,
       }),
@@ -1042,7 +874,13 @@ async function pollGpu() {
   } catch {}
 }
 
-setInterval(pollGpu, 5000);
+setInterval(() => {
+  // Skip work while the tab is in the background; refresh on return.
+  if (!document.hidden) pollGpu();
+}, 1000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) pollGpu();
+});
 
 // Run once on load too.
 pollGpu();
@@ -1097,40 +935,7 @@ elements.languageSwitch.querySelectorAll("button").forEach((button) => {
 elements.viewTabs.querySelectorAll("button").forEach((button) => {
   button.addEventListener("click", () => setView(button.dataset.view));
 });
-elements.codeEditor.addEventListener("input", () => recordEditorEdit());
-elements.codeEditor.addEventListener("beforeinput", (event) => {
-  if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
-    event.preventDefault();
-    if (event.inputType === "historyUndo") undoEditor();
-    else redoEditor();
-  }
-});
-elements.codeEditor.addEventListener("scroll", syncEditorScroll);
-elements.codeEditor.addEventListener("keydown", (event) => {
-  const modifier = event.ctrlKey || event.metaKey;
-  if (modifier && event.key.toLowerCase() === "z") {
-    event.preventDefault();
-    if (event.shiftKey) redoEditor();
-    else undoEditor();
-    return;
-  }
-  if (modifier && event.key.toLowerCase() === "y") {
-    event.preventDefault();
-    redoEditor();
-    return;
-  }
-  if (modifier && (event.key === "/" || event.code === "Slash")) {
-    event.preventDefault();
-    toggleLineComments();
-    return;
-  }
-  if (event.key !== "Tab") return;
-  event.preventDefault();
-  const start = elements.codeEditor.selectionStart;
-  const end = elements.codeEditor.selectionEnd;
-  elements.codeEditor.setRangeText("    ", start, end, "end");
-  elements.codeEditor.dispatchEvent(new Event("input"));
-});
+// Editor is created after DOM ready; see createEditor() near the bottom.
 elements.undoCode.addEventListener("click", undoEditor);
 elements.redoCode.addEventListener("click", redoEditor);
 elements.resetCode.addEventListener("click", () => {
@@ -1259,15 +1064,41 @@ document.querySelectorAll("[data-admin-tab]").forEach((button) => {
     );
   });
 });
-elements.vimToggle.addEventListener("click", () => {
-  const on = window.LeetGPUVim && window.LeetGPUVim.toggle();
-  elements.vimToggle.classList.toggle("active", !!on);
-  elements.vimMode.classList.toggle("on", !!on);
-  toast(on ? I18N.t("vim.on") : I18N.t("vim.off"));
-});
-if (window.LeetGPUVim && window.LeetGPUVim.enabled) {
-  elements.vimToggle.classList.add("active");
-  elements.vimMode.classList.add("on");
+// ---------- editor ----------
+
+let editor = null;
+let editorApi = null;
+
+function createEditor() {
+  const textarea = document.querySelector("#code-editor");
+  if (!textarea || !window.LeetGPUEditor) return;
+  state.vim = localStorage.getItem("leetgpu.vim") !== "0";
+  editorApi = window.LeetGPUEditor.create(textarea, {
+    language: state.language,
+    vim: state.vim,
+    onSave: saveDraft,
+  });
+  editor = editorApi.editor;
+  editor.on("change", () => recordEditorEdit());
+  editorApi.onVimModeChange((mode, subMode) => {
+    const label = subMode ? `${mode.toUpperCase()}·${subMode.toUpperCase()}` : mode.toUpperCase();
+    elements.vimMode.textContent = `-- ${label} --`;
+  });
+  elements.vimToggle.classList.toggle("active", state.vim);
+  elements.vimToggle.setAttribute("aria-pressed", state.vim ? "true" : "false");
+  elements.vimMode.classList.toggle("on", state.vim);
+  updateHistoryButtons();
 }
 
+elements.vimToggle.addEventListener("click", () => {
+  state.vim = !state.vim;
+  localStorage.setItem("leetgpu.vim", state.vim ? "1" : "0");
+  if (editorApi) editorApi.setVim(state.vim);
+  elements.vimToggle.classList.toggle("active", state.vim);
+  elements.vimToggle.setAttribute("aria-pressed", state.vim ? "true" : "false");
+  elements.vimMode.classList.toggle("on", state.vim);
+  toast(state.vim ? I18N.t("vim.on") : I18N.t("vim.off"));
+});
+
+createEditor();
 initialize();

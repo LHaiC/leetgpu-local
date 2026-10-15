@@ -974,40 +974,16 @@ a:focus-visible {
   position: relative;
   min-height: 0;
   flex: 1;
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
   overflow: hidden;
   background: #101210;
 }
 
-.line-numbers {
-  overflow: hidden;
-  padding: 15px 10px 40px 0;
-  border-right: 1px solid #252925;
-  color: #565d56;
-  font-family: Consolas, "Cascadia Code", monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  text-align: right;
-  white-space: pre;
-  user-select: none;
-}
-
-#code-editor {
-  width: 100%;
+/* CodeMirror fills the editor pane. */
+.editor-surface .CodeMirror {
   height: 100%;
-  min-height: 0;
-  resize: none;
-  padding: 15px 16px 40px;
-  border: 0;
-  outline: 0;
-  color: #e3e8e3;
-  background: transparent;
-  caret-color: var(--green);
   font-family: Consolas, "Cascadia Code", monospace;
   font-size: 12px;
   line-height: 1.6;
-  tab-size: 4;
 }
 
 .submission-bar {
@@ -1793,90 +1769,6 @@ body.authed .runner-field { display: none; }
 .auth-form .modal-actions { justify-content: space-between; }
 
 /* ============================================================
-   Editor — highlight layer, hints, scroll hygiene
-   ============================================================ */
-.editor-code {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.highlight-layer,
-.highlight-layer code {
-  font-family: Consolas, "Cascadia Code", monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  tab-size: 4;
-  letter-spacing: normal;
-}
-
-.highlight-layer {
-  position: absolute;
-  inset: 0;
-  margin: 0;
-  padding: 15px 16px 40px;
-  border: 0;
-  overflow: hidden;
-  background: transparent;
-  color: #e3e8e3;
-  white-space: pre;
-  word-wrap: normal;
-  pointer-events: none;
-}
-.highlight-layer code { display: block; }
-
-#code-editor {
-  position: absolute;
-  inset: 0;
-  color: transparent;
-  background: transparent;
-  caret-color: var(--green);
-  z-index: 1;
-}
-#code-editor::selection { background: rgba(72, 199, 116, 0.28); }
-
-/* token palette */
-.tok-comment { color: #69786a; font-style: italic; }
-.tok-string { color: #c3e88d; }
-.tok-preproc { color: #c792ea; }
-.tok-number { color: #f78c6c; }
-.tok-keyword { color: #82aaff; font-weight: 600; }
-.tok-type { color: #ffcb6b; }
-.tok-builtin { color: #89ddff; }
-.tok-call { color: #dcdcaa; }
-.tok-punct { color: #93a1a1; }
-
-/* completion popup */
-.hint-popup {
-  position: absolute;
-  z-index: 6;
-  min-width: 168px;
-  max-height: 208px;
-  overflow-y: auto;
-  padding: 4px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface-raised);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-  font-size: 12px;
-}
-.hint-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 9px;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.hint-item.active { background: var(--green-soft); }
-.hint-badge { width: 13px; height: 13px; border-radius: 3px; background: var(--border-strong); }
-.hint-badge.kw { background: #3b5ea8; }
-.hint-badge.fn { background: #2e6b57; }
-.hint-badge.ty { background: #8a6a2f; }
-.hint-label { font-family: Consolas, monospace; color: var(--text); }
-
-/* ============================================================
    Scroll hygiene — no stray horizontal scrollbars
    ============================================================ */
 .workspace,
@@ -1986,7 +1878,7 @@ body {
   --grid-size: 32px;
 }
 
-.editor-code,
+.editor-surface,
 .problem-body,
 .results-view,
 .leaderboard-view {
@@ -1996,9 +1888,8 @@ body {
   background-position: -1px -1px;
 }
 
-/* Soft radial glow so the editor canvas reads as lit, not flat.
-   Sits below the highlight layer, textarea and popup (z-index 1+). */
-.editor-code::before {
+/* Soft radial glow so the editor canvas reads as lit, not flat. */
+.editor-surface::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -2008,10 +1899,6 @@ body {
     radial-gradient(680px 380px at 12% -8%, rgba(72, 199, 116, 0.07), transparent 62%),
     radial-gradient(560px 320px at 100% 110%, rgba(87, 184, 199, 0.055), transparent 60%);
 }
-.highlight-layer,
-.editor-code > #code-editor,
-.editor-code > .hint-popup { z-index: 1; }
-
 /* The full-page version was hidden behind opaque panels — remove it. */
 body { background-image: none; }
 
@@ -2048,3 +1935,134 @@ body { background-image: none; }
   white-space: nowrap;
 }
 .leaderboard-table th { white-space: nowrap; }
+
+/* ============================================================
+   CodeMirror theme (dark) + indentation guides
+   ============================================================ */
+.cm-s-leetgpu.CodeMirror {
+  height: 100%;
+  color: #e3e8e3;
+  background: transparent;
+}
+.cm-s-leetgpu .CodeMirror-gutters {
+  border-right: 1px solid #252925;
+  background: transparent;
+}
+.cm-s-leetgpu .CodeMirror-linenumber {
+  padding: 0 12px 0 8px;
+  color: #565d56;
+}
+.cm-s-leetgpu .CodeMirror-cursor { border-left: 2px solid var(--green); }
+.cm-s-leetgpu .CodeMirror-selected { background: rgba(72, 199, 116, 0.22); }
+.cm-s-leetgpu .CodeMirror-focused .CodeMirror-selected,
+.cm-s-leetgpu .CodeMirror-line::selection,
+.cm-s-leetgpu .CodeMirror-line > span::selection,
+.cm-s-leetgpu .CodeMirror-line > span > span::selection {
+  background: rgba(72, 199, 116, 0.30);
+}
+.cm-s-leetgpu .CodeMirror-activeline-background { background: rgba(255, 255, 255, 0.035); }
+.cm-s-leetgpu .CodeMirror-matchingbracket {
+  color: #0e1210 !important;
+  background: var(--green);
+  border-radius: 2px;
+}
+.cm-s-leetgpu .CodeMirror-nonmatchingbracket { color: var(--red) !important; }
+
+/* tokens */
+.cm-s-leetgpu .cm-comment { color: #69786a; font-style: italic; }
+.cm-s-leetgpu .cm-string,
+.cm-s-leetgpu .cm-string-2 { color: #c3e88d; }
+.cm-s-leetgpu .cm-number { color: #f78c6c; }
+.cm-s-leetgpu .cm-keyword { color: #82aaff; font-weight: 600; }
+.cm-s-leetgpu .cm-type,
+.cm-s-leetgpu .cm-variable-3 { color: #ffcb6b; }
+.cm-s-leetgpu .cm-builtin,
+.cm-s-leetgpu .cm-variable-2 { color: #89ddff; }
+.cm-s-leetgpu .cm-def { color: #dcdcaa; }
+.cm-s-leetgpu .cm-operator,
+.cm-s-leetgpu .cm-punctuation,
+.cm-s-leetgpu .cm-bracket { color: #93a1a1; }
+.cm-s-leetgpu .cm-atom { color: #f78c6c; }
+.cm-s-leetgpu .cm-meta,
+.cm-s-leetgpu .cm-preprocessor { color: #c792ea; }
+
+/* Indentation guides: the overlay tags each line's leading whitespace and the
+   gradient paints a hairline at every indent stop (indentUnit = 4). */
+.cm-s-leetgpu .cm-indent-guide {
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent calc(4ch - 1px),
+    rgba(255, 255, 255, 0.11) calc(4ch - 1px),
+    rgba(255, 255, 255, 0.11) 4ch
+  );
+}
+
+/* ============================================================
+   Waiting / running feedback
+   ============================================================ */
+@keyframes lgl-spin { to { transform: rotate(360deg); } }
+@keyframes lgl-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+@keyframes lgl-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.result-state.running .result-state-icon svg {
+  animation: lgl-spin 1.1s linear infinite;
+}
+.result-state.running .result-state-body {
+  flex: 1;
+  min-width: 0;
+}
+/* Indeterminate progress bar while a job is queued or running. */
+.progress-track {
+  position: relative;
+  align-self: center;
+  width: clamp(120px, 34%, 260px);
+  height: 4px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--border);
+}
+.progress-bar {
+  width: 25%;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  animation: lgl-slide 1.25s ease-in-out infinite;
+}
+
+/* The live log gets a soft shimmer so it reads as "streaming". */
+.execution-output.streaming {
+  border-color: var(--green-strong);
+  animation: lgl-pulse 1.8s ease-in-out infinite;
+}
+
+/* Result tab indicator keeps pulsing while work is in flight. */
+.tab-indicator.visible { animation: lgl-pulse 1.4s ease-in-out infinite; }
+
+/* Queue state in the top bar breathes while busy. */
+.queue-state.busy { color: var(--amber); animation: lgl-pulse 1.4s ease-in-out infinite; }
+
+/* ============================================================
+   Vim toggle — clearly reads as pressed / released
+   ============================================================ */
+#vim-toggle { color: var(--muted); }
+#vim-toggle:hover { color: var(--text); }
+#vim-toggle.active {
+  color: #071109;
+  background: var(--green);
+  border-color: var(--green-strong);
+}
+#vim-toggle.active svg { stroke-width: 2.4; }
+
+/* Running summary must fill the card; the progress bar keeps a fixed slot. */
+.result-summary > .result-state { flex: 1 1 auto; min-width: 0; }
+.result-state-body { flex: 1 1 auto; min-width: 0; }
+.result-state-body strong,
+.result-state-body span { white-space: normal; }
+.progress-track { flex: 0 0 auto; }

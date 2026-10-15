@@ -88,6 +88,18 @@ class LocalWebApiTest(unittest.TestCase):
         self.assertEqual(job["status"], "queued")
         self.assertEqual(job["mode"], "test")
 
+    def test_serves_nested_static_files(self):
+        with urlopen(f"{self.base_url}/static/vendor/codemirror/lib/codemirror.js", timeout=5) as r:
+            body = r.read()
+        self.assertEqual(r.status, 200)
+        self.assertIn(b"CodeMirror", body)
+
+    def test_rejects_static_path_traversal(self):
+        for path in ("/static/../scripts/local_web.py", "/static/vendor/../../local_web.py"):
+            with self.assertRaises(HTTPError) as context:
+                urlopen(f"{self.base_url}{path}", timeout=5)
+            self.assertIn(context.exception.code, (403, 404))
+
     def get_json(self, path):
         with urlopen(f"{self.base_url}{path}", timeout=5) as response:
             return json.load(response)

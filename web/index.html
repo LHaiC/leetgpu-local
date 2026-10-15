@@ -7,11 +7,22 @@
     <title>LeetGPU Local</title>
     <link rel="icon" type="image/svg+xml" href="/static/logo.svg" />
     <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/vendor/codemirror/lib/codemirror.css" />
+    <link rel="stylesheet" href="/static/vendor/codemirror/addon/dialog/dialog.css" />
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+    <script src="/static/vendor/codemirror/lib/codemirror.js" defer></script>
+    <script src="/static/vendor/codemirror/keymap/vim.js" defer></script>
+    <script src="/static/vendor/codemirror/mode/clike/clike.js" defer></script>
+    <script src="/static/vendor/codemirror/mode/python/python.js" defer></script>
+    <script src="/static/vendor/codemirror/addon/selection/active-line.js" defer></script>
+    <script src="/static/vendor/codemirror/addon/edit/matchbrackets.js" defer></script>
+    <script src="/static/vendor/codemirror/addon/edit/closebrackets.js" defer></script>
+    <script src="/static/vendor/codemirror/addon/comment/comment.js" defer></script>
+    <script src="/static/vendor/codemirror/addon/search/searchcursor.js" defer></script>
+    <script src="/static/vendor/codemirror/addon/dialog/dialog.js" defer></script>
+    <script src="/static/editor-setup.js" defer></script>
     <script src="/static/i18n.js" defer></script>
-    <script src="/static/highlight.js" defer></script>
-    <script src="/static/vim.js" defer></script>
     <script src="/static/app.js" defer></script>
   </head>
   <body>
@@ -208,19 +219,7 @@
                 </div>
               </div>
               <div class="editor-surface">
-                <div class="line-numbers" id="line-numbers" aria-hidden="true">1</div>
-                <div class="editor-code">
-                  <pre class="highlight-layer" id="highlight-layer" aria-hidden="true"><code id="highlight-code"></code></pre>
-                  <textarea
-                    id="code-editor"
-                    aria-label="代码编辑器"
-                    autocomplete="off"
-                    autocapitalize="off"
-                    spellcheck="false"
-                    wrap="off"
-                  ></textarea>
-                  <div class="hint-popup hidden" id="hint-popup" role="listbox"></div>
-                </div>
+                <textarea id="code-editor" aria-label="代码编辑器"></textarea>
               </div>
               <div class="submission-bar">
                 <label class="runner-field">
