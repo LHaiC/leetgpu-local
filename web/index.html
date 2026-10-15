@@ -294,21 +294,21 @@
       </div>
       <form class="auth-form" id="auth-form" method="dialog">
         <label>
-          <span>用户名</span>
+          <span data-i18n="auth.username">用户名</span>
           <input id="auth-username" autocomplete="username" required minlength="2" maxlength="32" />
         </label>
         <label>
-          <span>密码</span>
+          <span data-i18n="auth.password">密码</span>
           <input id="auth-password" type="password" autocomplete="current-password" required minlength="6" />
         </label>
         <label class="hidden" id="auth-confirm-wrap">
-          <span>确认密码</span>
+          <span data-i18n="auth.confirm">确认密码</span>
           <input id="auth-confirm" type="password" autocomplete="new-password" minlength="6" />
         </label>
         <div class="auth-error" id="auth-error"></div>
         <div class="modal-actions">
-          <button type="button" class="ghost-button" id="auth-switch">没有账号？注册</button>
-          <button type="submit" class="primary-button" id="auth-submit">登录</button>
+          <button type="button" class="ghost-button" id="auth-switch" data-i18n="auth.no_account">没有账号？注册</button>
+          <button type="submit" class="primary-button" id="auth-submit" data-i18n="auth.login">登录</button>
         </div>
       </form>
     </dialog>
