@@ -516,10 +516,18 @@ class MultiuserStore:
                         password_hash TEXT NOT NULL,
                         role TEXT NOT NULL DEFAULT 'user',
                         disabled INTEGER NOT NULL DEFAULT 0,
+                        approved INTEGER NOT NULL DEFAULT 1,
                         created_at TEXT NOT NULL
                     )
                     """
                 )
+                columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(users)").fetchall()
+                }
+                if "approved" not in columns:
+                    connection.execute(
+                        "ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1"
+                    )
                 connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS sessions (
@@ -572,7 +580,7 @@ class MultiuserStore:
             return int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
 
     def create_user(
-        self, username: str, password: str, role: str = "user"
+        self, username: str, password: str, role: str = "user", approved: bool = True
     ) -> Dict[str, Any]:
         if not USERNAME_PATTERN.match(username):
             raise ValueError("用户名只能包含字母、数字、_ . -，长度 2-32")
@@ -582,9 +590,15 @@ class MultiuserStore:
             with connection:
                 try:
                     connection.execute(
-                        "INSERT INTO users (username, password_hash, role, created_at) "
-                        "VALUES (?, ?, ?, ?)",
-                        (username, hash_password(password), role, utc_now()),
+                        "INSERT INTO users (username, password_hash, role, approved, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (
+                            username,
+                            hash_password(password),
+                            role,
+                            1 if (role == "admin" or approved) else 0,
+                            utc_now(),
+                        ),
                     )
                 except sqlite3.IntegrityError:
                     raise ValueError("用户名已被使用")
@@ -593,7 +607,8 @@ class MultiuserStore:
     def get_user(self, username: str) -> Optional[Dict[str, Any]]:
         with closing(self._connect()) as connection:
             row = connection.execute(
-                "SELECT username, role, disabled, created_at FROM users WHERE username = ?",
+                "SELECT username, role, disabled, approved, created_at FROM users "
+                "WHERE username = ?",
                 (username,),
             ).fetchone()
         return dict(row) if row else None
@@ -601,7 +616,7 @@ class MultiuserStore:
     def verify_login(self, username: str, password: str) -> Optional[Dict[str, Any]]:
         with closing(self._connect()) as connection:
             row = connection.execute(
-                "SELECT username, password_hash, role, disabled FROM users "
+                "SELECT username, password_hash, role, disabled, approved FROM users "
                 "WHERE username = ?",
                 (username,),
             ).fetchone()
@@ -609,14 +624,58 @@ class MultiuserStore:
             return None
         if not verify_password(password, row["password_hash"]):
             return None
+        if not row["approved"]:
+            return {"username": row["username"], "role": row["role"], "pending": True}
         return {"username": row["username"], "role": row["role"]}
 
-    def list_users(self) -> List[Dict[str, Any]]:
+    def list_users(self, pending: Optional[bool] = None) -> List[Dict[str, Any]]:
+        query = "SELECT username, role, disabled, approved, created_at FROM users"
+        params: tuple = ()
+        if pending is not None:
+            query += " WHERE approved = ?"
+            params = (0 if pending else 1,)
+        query += " ORDER BY created_at"
         with closing(self._connect()) as connection:
-            rows = connection.execute(
-                "SELECT username, role, disabled, created_at FROM users ORDER BY created_at"
-            ).fetchall()
+            rows = connection.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    def set_approved(self, username: str, approved: bool) -> bool:
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "UPDATE users SET approved = ? WHERE username = ?",
+                    (int(approved), username),
+                )
+                if cursor.rowcount and not approved:
+                    connection.execute(
+                        "DELETE FROM sessions WHERE username = ?", (username,)
+                    )
+                return cursor.rowcount > 0
+
+    def set_role(self, username: str, role: str) -> bool:
+        if role not in {"user", "admin"}:
+            raise ValueError("role must be user or admin")
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "UPDATE users SET role = ? WHERE username = ?", (role, username)
+                )
+                return cursor.rowcount > 0
+
+    def admin_reset_password(self, username: str, new_password: str) -> bool:
+        if len(new_password) < 6:
+            raise ValueError("密码至少 6 位")
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "UPDATE users SET password_hash = ? WHERE username = ?",
+                    (hash_password(new_password), username),
+                )
+                if cursor.rowcount:
+                    connection.execute(
+                        "DELETE FROM sessions WHERE username = ?", (username,)
+                    )
+                return cursor.rowcount > 0
 
     def set_disabled(self, username: str, disabled: bool) -> bool:
         with closing(self._connect()) as connection:
@@ -1191,6 +1250,25 @@ def system_info() -> Dict[str, Any]:
         "python": sys.executable,
     }
 
+def gpu_stats() -> Dict[str, Any]:
+    """Live GPU utilization + VRAM for the topbar widget."""
+    command = [
+        "nvidia-smi",
+        "--query-gpu=utilization.gpu,memory.used,memory.total",
+        "--format=csv,noheader,nounits",
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        return {"available": False}
+    util, used, total = [v.strip() for v in result.stdout.splitlines()[0].split(",")]
+    return {
+        "available": True,
+        "util_pct": int(float(util)),
+        "mem_used_mb": int(float(used)),
+        "mem_total_mb": int(float(total)),
+        "mem_pct": round(100 * float(used) / float(total), 1),
+    }
+
 
 class WebApplication:
     def __init__(
@@ -1219,11 +1297,13 @@ class WebApplication:
         )
         self.system = system_info()
 
-    def registration_open(self) -> bool:
-        # Open by default until the first admin exists; then configurable.
+    def registration_mode(self) -> str:
         if self.users.user_count() == 0:
-            return True
-        return self.users.site_setting("registration_open", "1") == "1"
+            return "open"
+        return self.users.site_setting("registration_mode", "open")
+
+    def registration_open(self) -> bool:
+        return self.registration_mode() == "open"
 
     def challenge_list(self, username: str = "") -> List[Dict[str, Any]]:
         progress = self.scores.challenge_progress(username or None)
@@ -1397,6 +1477,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "user": user,
                     "auth_required": self.app.auth_required,
                     "registration_open": self.app.registration_open(),
+                    "registration_mode": self.app.registration_mode(),
+                    "maintenance": self.app.users.site_setting("maintenance") == "1",
                 })
             elif parsed.path == "/api/announcements":
                 self.send_json({"announcements": self.app.users.announcements()})
@@ -1409,6 +1491,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(self.app.catalog.detail(query.get("key", [""])[0]))
             elif parsed.path == "/api/system":
                 self.send_json(self.app.system)
+            elif parsed.path == "/api/system/gpu":
+                self.send_json(gpu_stats())
             elif parsed.path == "/api/leaderboard":
                 challenge = query.get("challenge", [""])[0]
                 self.app.catalog.require(challenge)
@@ -1445,6 +1529,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/admin/users":
                 self.require_admin()
                 self.send_json({"users": self.app.users.list_users()})
+            elif parsed.path == "/api/admin/pending":
+                self.require_admin()
+                self.send_json(
+                    {"users": self.app.users.list_users(pending=True)}
+                )
             elif parsed.path.startswith("/api/jobs/"):
                 user = self.require_user()
                 parts = parsed.path.strip("/").split("/")
@@ -1495,17 +1584,29 @@ class RequestHandler(BaseHTTPRequestHandler):
                 username = str(body.get("username", "")).strip()
                 password = str(body.get("password", ""))
                 first_user = self.app.users.user_count() == 0
-                if not (first_user or self.app.registration_open()):
-                    raise PermissionError("注册已关闭，请联系管理员")
+                mode = self.app.registration_mode()
+                if not first_user:
+                    if mode == "closed":
+                        raise PermissionError("Registration is closed")
+                approved = first_user or mode == "open"
                 user = self.app.users.create_user(
-                    username, password, role="admin" if first_user else "user"
+                    username,
+                    password,
+                    role="admin" if first_user else "user",
+                    approved=approved,
                 )
-                token = self.app.users.create_session(user["username"])
-                self.send_json(
-                    {"user": self.app.users.get_user(user["username"])},
-                    status=HTTPStatus.CREATED,
-                    cookie=token,
-                )
+                if approved:
+                    token = self.app.users.create_session(user["username"])
+                    self.send_json(
+                        {"user": self.app.users.get_user(user["username"])},
+                        status=HTTPStatus.CREATED,
+                        cookie=token,
+                    )
+                else:
+                    self.send_json(
+                        {"pending": True, "message": "Account created, pending admin approval"},
+                        status=HTTPStatus.ACCEPTED,
+                    )
             elif parsed.path == "/api/auth/login":
                 if self._login_throttled():
                     self.send_error_json(
@@ -1520,6 +1621,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 if user is None:
                     raise PermissionError("用户名或密码错误")
+                if isinstance(user, dict) and user.get("pending"):
+                    self.send_error_json(HTTPStatus.FORBIDDEN, "账号待管理员审核")
+                    return
                 token = self.app.users.create_session(user["username"])
                 self.send_json({"user": user}, cookie=token)
             elif parsed.path == "/api/auth/logout":
@@ -1542,6 +1646,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"changed": True})
             elif parsed.path == "/api/jobs":
                 user = self.require_user()
+                if self.app.users.site_setting("maintenance") == "1":
+                    self.send_error_json(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        "站点维护中，暂停提交",
+                    )
+                    return
                 body = self.read_json()
                 for field in ("challenge", "language", "source", "runner_name", "mode"):
                     if field in body and not isinstance(body[field], str):
@@ -1579,17 +1689,50 @@ class RequestHandler(BaseHTTPRequestHandler):
                     ),
                     status=HTTPStatus.CREATED,
                 )
+            elif parsed.path == "/api/admin/users":
+                self.require_admin()
+                body = self.read_json()
+                username = str(body.get("username", "")).strip()
+                password = str(body.get("password", ""))
+                role = str(body.get("role", "user"))
+                if role not in {"user", "admin"}:
+                    raise ValueError("role must be user or admin")
+                created = self.app.users.create_user(
+                    username, password, role=role, approved=True
+                )
+                self.send_json(created, status=HTTPStatus.CREATED)
+            elif parsed.path == "/api/admin/users/role":
+                self.require_admin()
+                body = self.read_json()
+                self.send_json(
+                    {"ok": self.app.users.set_role(
+                        str(body.get("username", "")), str(body.get("role", "user"))
+                    )}
+                )
+            elif parsed.path == "/api/admin/users/password":
+                self.require_admin()
+                body = self.read_json()
+                self.send_json(
+                    {"ok": self.app.users.admin_reset_password(
+                        str(body.get("username", "")), str(body.get("password", ""))
+                    )}
+                )
             elif parsed.path == "/api/admin/settings":
                 self.require_admin()
                 body = self.read_json()
-                if "registration_open" in body:
+                if "registration_mode" in body:
+                    mode = str(body["registration_mode"])
+                    if mode not in {"open", "review", "closed"}:
+                        raise ValueError("registration_mode must be open|review|closed")
+                    self.app.users.set_site_setting("registration_mode", mode)
+                if "maintenance" in body:
                     self.app.users.set_site_setting(
-                        "registration_open",
-                        "1" if body["registration_open"] else "0",
+                        "maintenance", "1" if body["maintenance"] else "0"
                     )
-                self.send_json(
-                    {"registration_open": self.app.registration_open()}
-                )
+                self.send_json({
+                    "registration_mode": self.app.registration_mode(),
+                    "maintenance": self.app.users.site_setting("maintenance") == "1",
+                })
             elif parsed.path == "/api/settings":
                 body = self.read_json()
                 directory = body.get("ncu_export_dir")
@@ -1667,6 +1810,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                 elif action == "enable":
                     self.send_json(
                         {"enabled": self.app.users.set_disabled(target, False)}
+                    )
+                elif action == "approve":
+                    self.send_json(
+                        {"approved": self.app.users.set_approved(target, True)}
+                    )
+                elif action == "reject":
+                    self.send_json(
+                        {"rejected": self.app.users.delete_user(target)}
                     )
                 else:
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown user action")

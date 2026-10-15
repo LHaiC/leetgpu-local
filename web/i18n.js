@@ -1,0 +1,277 @@
+/* zh/en i18n for LeetGPU Local. */
+(function () {
+  const DICT = {
+    zh: {
+      // chrome
+      "app.title": "LeetGPU Local",
+      "nav.gpu_check": "检测 GPU",
+      "nav.idle": "空闲",
+      "nav.login": "登录",
+      "nav.logout": "登出",
+      "nav.admin": "站点管理",
+      "nav.settings": "设置",
+      "nav.api": "API",
+      "nav.vim": "Vim 模式",
+      "nav.lang": "EN",
+      "gpu.waiting": "等待 GPU…",
+      // sidebar
+      "sidebar.search": "搜索题目",
+      "sidebar.all": "全部",
+      "sidebar.easy": "简单",
+      "sidebar.medium": "中等",
+      "sidebar.hard": "困难",
+      "sidebar.local_repo": "本地题库",
+      "sidebar.difficulty": "难度筛选",
+      // tabs
+      "tab.description": "题目",
+      "tab.results": "运行结果",
+      "tab.leaderboard": "排行榜",
+      // editor
+      "editor.runner": "运行器",
+      "editor.nsight": "Nsight",
+      "editor.test": "测试",
+      "editor.submit": "提交并计分",
+      "editor.starter": "初始代码",
+      "editor.saved": "已保存",
+      "editor.edited": "已编辑",
+      // leaderboard
+      "lb.rank": "排名",
+      "lb.name": "名称",
+      "lb.user": "用户",
+      "lb.lang": "语言",
+      "lb.gpu": "GPU",
+      "lb.median": "中位 (ms)",
+      "lb.min": "最短 (ms)",
+      "lb.p95": "P95 (ms)",
+      "lb.empty": "暂无记录，提交一次试试",
+      "lb.local_only": "本排行榜仅包含本机提交，不与官方对比",
+      // results pane
+      "res.log": "执行日志",
+      "res.tests": "测试",
+      "res.passed": "通过",
+      "res.failed": "失败",
+      "res.errors": "错误",
+      "res.benchmark": "基准",
+      "res.incorrect": "不正确",
+      "res.no_run": "还没有运行记录。点击「测试」先跑正确性，再「提交」计分。",
+      // challenge
+      "ch.loading": "加载中",
+      "ch.loading_desc": "正在读取题目…",
+      "ch.free": "免费",
+      "ch.report_bug": "报告题目问题",
+      "ch.show_hint": "提示",
+      "ch.hide_hint": "收起提示",
+      "ch.vram": "显存",
+      "ch.params": "参数",
+      "ch.constraints": "约束",
+      "ch.examples": "示例",
+      "ch.copy_code": "复制代码",
+      // settings modal
+      "set.title": "设置",
+      "set.ncu_dir": "Nsight Compute 报告导出目录",
+      "set.browse": "浏览…",
+      "set.save": "保存",
+      "set.toggle": "提交时自动跑 Nsight Compute",
+      "set.toggle_hint": "生成 .ncu-rep 供下载，耗时约分钟级",
+      "set.cancel": "取消",
+      // auth
+      "auth.login": "登录",
+      "auth.register": "注册",
+      "auth.username": "用户名",
+      "auth.password": "密码",
+      "auth.confirm": "确认密码",
+      "auth.no_account": "没有账号？注册",
+      "auth.has_account": "已有账号？登录",
+      "auth.pending": "账号已创建，等待管理员审核",
+      // admin
+      "admin.title": "站点管理",
+      "admin.announcements": "公告",
+      "admin.users": "用户",
+      "admin.pending": "待审核",
+      "admin.publish": "发布公告",
+      "admin.reg_mode": "注册方式",
+      "admin.reg_open": "开放注册",
+      "admin.reg_review": "注册需审核",
+      "admin.reg_closed": "关闭注册",
+      "admin.maintenance": "维护模式（暂停提交）",
+      "admin.add_user": "手动添加用户",
+      "admin.role_user": "普通用户",
+      "admin.role_admin": "管理员",
+      "admin.reset_pw": "重置密码",
+      "admin.delete": "删除",
+      "admin.approve": "通过",
+      "admin.reject": "拒绝",
+      "admin.title_ph": "标题",
+      "admin.body_ph": "内容",
+      // maintenance banner
+      "maint.banner": "维护模式：暂停提交，可浏览题目",
+      // misc
+      "misc.copy": "复制",
+      "misc.undo": "撤销",
+      "misc.redo": "重做",
+      "misc.close": "关闭",
+      "misc.profile": "档案",
+      "misc.guide": "指引",
+      "misc.glossary": "术语表",
+      "misc.practice_mode": "练习模式",
+      "misc.read_docs": "请阅读右上角的 Guide / Glossary",
+      "misc.loading": "加载中",
+      "misc.error": "加载失败，请查看日志",
+      // job
+      "job.accepted": "已通过",
+      "job.failed": "未通过",
+      "job.test_passed": "✅ 测试通过",
+      "job.test_failed": "❌ 测试未通过",
+      "job.job_label": "任务",
+    },
+    en: {
+      "app.title": "LeetGPU Local",
+      "nav.gpu_check": "Checking GPU",
+      "nav.idle": "Idle",
+      "nav.login": "Sign in",
+      "nav.logout": "Sign out",
+      "nav.admin": "Admin",
+      "nav.settings": "Settings",
+      "nav.api": "API",
+      "nav.vim": "Vim mode",
+      "nav.lang": "中文",
+      "gpu.waiting": "Waiting for GPU…",
+      "sidebar.search": "Search problems",
+      "sidebar.all": "All",
+      "sidebar.easy": "Easy",
+      "sidebar.medium": "Medium",
+      "sidebar.hard": "Hard",
+      "sidebar.local_repo": "Local repo",
+      "sidebar.difficulty": "Difficulty",
+      "tab.description": "Problem",
+      "tab.results": "Results",
+      "tab.leaderboard": "Leaderboard",
+      "editor.runner": "Runner",
+      "editor.nsight": "Nsight",
+      "editor.test": "Test",
+      "editor.submit": "Submit & score",
+      "editor.starter": "Starter",
+      "editor.saved": "Saved",
+      "editor.edited": "Edited",
+      "lb.rank": "Rank",
+      "lb.name": "Name",
+      "lb.user": "User",
+      "lb.lang": "Lang",
+      "lb.gpu": "GPU",
+      "lb.median": "Median (ms)",
+      "lb.min": "Min (ms)",
+      "lb.p95": "P95 (ms)",
+      "lb.empty": "No submissions yet",
+      "lb.local_only": "Local submissions only — not comparable to leetgpu.com",
+      "res.log": "Execution log",
+      "res.tests": "Tests",
+      "res.passed": "Passed",
+      "res.failed": "Failed",
+      "res.errors": "Errors",
+      "res.benchmark": "Benchmark",
+      "res.incorrect": "Incorrect",
+      "res.no_run": "No runs yet. Hit Test for correctness, Submit to score.",
+      "ch.loading": "Loading",
+      "ch.loading_desc": "Loading problem…",
+      "ch.free": "FREE",
+      "ch.report_bug": "Report problem",
+      "ch.show_hint": "Show hint",
+      "ch.hide_hint": "Hide hint",
+      "ch.vram": "VRAM",
+      "ch.params": "Params",
+      "ch.constraints": "Constraints",
+      "ch.examples": "Examples",
+      "ch.copy_code": "Copy code",
+      "set.title": "Settings",
+      "set.ncu_dir": "Nsight Compute report export directory",
+      "set.browse": "Browse…",
+      "set.save": "Save",
+      "set.toggle": "Profile with Nsight Compute on submit",
+      "set.toggle_hint": "Produces a .ncu-rep for download; takes minutes",
+      "set.cancel": "Cancel",
+      "auth.login": "Sign in",
+      "auth.register": "Sign up",
+      "auth.username": "Username",
+      "auth.password": "Password",
+      "auth.confirm": "Confirm password",
+      "auth.no_account": "No account? Sign up",
+      "auth.has_account": "Have an account? Sign in",
+      "auth.pending": "Account created — pending admin approval",
+      "admin.title": "Site admin",
+      "admin.announcements": "Announcements",
+      "admin.users": "Users",
+      "admin.pending": "Pending",
+      "admin.publish": "Publish",
+      "admin.reg_mode": "Registration",
+      "admin.reg_open": "Open",
+      "admin.reg_review": "Review required",
+      "admin.reg_closed": "Closed",
+      "admin.maintenance": "Maintenance mode (submissions paused)",
+      "admin.add_user": "Add user",
+      "admin.role_user": "User",
+      "admin.role_admin": "Admin",
+      "admin.reset_pw": "Reset password",
+      "admin.delete": "Delete",
+      "admin.approve": "Approve",
+      "admin.reject": "Reject",
+      "admin.title_ph": "Title",
+      "admin.body_ph": "Body",
+      "maint.banner": "Maintenance mode: submissions paused",
+      "misc.copy": "Copy",
+      "misc.undo": "Undo",
+      "misc.redo": "Redo",
+      "misc.close": "Close",
+      "misc.profile": "Profile",
+      "misc.guide": "Guide",
+      "misc.glossary": "Glossary",
+      "misc.practice_mode": "Practice mode",
+      "misc.read_docs": "Read Guide / Glossary in the top-right",
+      "misc.loading": "Loading",
+      "misc.error": "Failed — check logs",
+      "job.accepted": "Accepted",
+      "job.failed": "Failed",
+      "job.test_passed": "✅ Tests passed",
+      "job.test_failed": "❌ Tests failed",
+      "job.job_label": "Job",
+    },
+  };
+
+  const LANG_KEY = "leetgpu.lang";
+
+  function current() {
+    return localStorage.getItem(LANG_KEY) ||
+      (navigator.language.startsWith("zh") ? "zh" : "en");
+  }
+
+  function t(key) {
+    return DICT[current()][key] ?? DICT.en[key] ?? key;
+  }
+
+  function apply(root = document) {
+    root.querySelectorAll("[data-i18n]").forEach((el) => {
+      el.textContent = t(el.dataset.i18n);
+    });
+    root.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+      el.placeholder = t(el.dataset.i18nPlaceholder);
+    });
+    root.querySelectorAll("[data-i18n-title]").forEach((el) => {
+      el.title = t(el.dataset.i18nTitle);
+    });
+    document.documentElement.lang = current() === "zh" ? "zh-CN" : "en";
+  }
+
+  function toggle() {
+    const next = current() === "zh" ? "en" : "zh";
+    localStorage.setItem(LANG_KEY, next);
+    apply();
+    return next;
+  }
+
+  window.I18N = { t, apply, toggle, current };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => apply());
+  } else {
+    apply();
+  }
+})();

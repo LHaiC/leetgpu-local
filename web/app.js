@@ -64,7 +64,20 @@ const elements = {
   logoutButton: document.querySelector("#logout-button"),
   userMenuButton: document.querySelector("#user-menu-button"),
   usernameLabel: document.querySelector("#username-label"),
-  registrationOpen: document.querySelector("#registration-open"),
+  registrationMode: document.querySelector("#registration-mode"),
+  maintenanceToggle: document.querySelector("#maintenance-toggle"),
+  maintenanceBanner: document.querySelector("#maintenance-banner"),
+  adminPendingList: document.querySelector("#admin-pending-list"),
+  addUserForm: document.querySelector("#add-user-form"),
+  addUsername: document.querySelector("#add-username"),
+  addPassword: document.querySelector("#add-password"),
+  addRole: document.querySelector("#add-role"),
+  langToggle: document.querySelector("#lang-toggle"),
+  gpuWidget: document.querySelector("#gpu-widget"),
+  gpuUtilFill: document.querySelector("#gpu-util-fill"),
+  gpuUtilLabel: document.querySelector("#gpu-util-label"),
+  gpuMemFill: document.querySelector("#gpu-mem-fill"),
+  gpuMemLabel: document.querySelector("#gpu-mem-label"),
   adminUsersList: document.querySelector("#admin-users-list"),
   adminAnnouncementsList: document.querySelector("#admin-announcements-list"),
   announcementForm: document.querySelector("#announcement-form"),
@@ -80,6 +93,7 @@ const session = {
   registrationOpen: true,
   authMode: "login",
 };
+window.session = session;
 
 const state = {
   challenges: [],
@@ -158,6 +172,7 @@ function renderAuthState() {
     "hidden",
     !(loggedIn && session.user.role === "admin"),
   );
+  document.body.classList.toggle("authed", loggedIn);
   if (loggedIn) elements.usernameLabel.textContent = session.user.username;
   refreshIcons();
 }
@@ -932,13 +947,74 @@ async function loadAdminUsers() {
   }
 }
 
+async function loadPendingUsers() {
+  try {
+    const data = await api("/api/admin/pending");
+    const list = elements.adminPendingList;
+    if (!data.users.length) {
+      list.innerHTML = '<div class="empty-state">No pending users</div>';
+      return;
+    }
+    list.innerHTML = data.users
+      .map(
+        (u) => `
+        <div class="admin-row">
+          <span class="admin-row-main">${escapeHtml(u.username)}<span class="pending-badge" data-i18n="admin.pending">待审核</span></span>
+          <div class="admin-actions">
+            <button class="icon-button" data-approve="${escapeHtml(u.username)}" title="Approve"><i data-lucide="check"></i></button>
+            <button class="icon-button" data-reject="${escapeHtml(u.username)}" title="Reject"><i data-lucide="x"></i></button>
+          </div>
+        </div>`,
+      )
+      .join("");
+    list.querySelectorAll("[data-approve]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        await api(`/api/admin/users/${b.dataset.approve}/approve`, { method: "DELETE" });
+        await loadPendingUsers();
+      }),
+    );
+    list.querySelectorAll("[data-reject]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        await api(`/api/admin/users/${b.dataset.reject}/reject`, { method: "DELETE" });
+        await loadPendingUsers();
+      }),
+    );
+    refreshIcons();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
 async function openAdmin() {
   elements.adminModal.showModal();
-  elements.registrationOpen.checked = session.registrationOpen;
+  const me = await api("/api/me");
+  elements.registrationMode.value = me.registration_mode;
+  elements.maintenanceToggle.checked = me.maintenance;
   await loadAdminAnnouncements();
   await loadAdminUsers();
+  await loadPendingUsers();
   refreshIcons();
 }
+
+// ---------- GPU widget ----------
+
+async function pollGpu() {
+  try {
+    const data = await api("/api/system/gpu");
+    if (!data.available) return;
+    elements.gpuWidget.classList.add("loaded");
+    elements.gpuUtilFill.style.width = data.util_pct + "%";
+    elements.gpuUtilLabel.textContent = data.util_pct + "%";
+    elements.gpuUtilFill.className =
+      "gpu-bar-fill" + (data.util_pct > 85 ? " crit" : data.util_pct > 60 ? " hot" : "");
+    elements.gpuMemFill.style.width = data.mem_pct + "%";
+    elements.gpuMemLabel.textContent = data.mem_pct + "%";
+    elements.gpuMemFill.className =
+      "gpu-bar-fill mem" + (data.mem_pct > 90 ? " crit" : data.mem_pct > 75 ? " hot" : "");
+  } catch {}
+}
+
+setInterval(pollGpu, 5000);
 
 async function saveSettings() {
   try {
@@ -954,6 +1030,9 @@ async function saveSettings() {
     toast(error.message, "error");
   }
 }
+
+// Run once on load too.
+pollGpu();
 
 async function pickNcuDirectory() {
   elements.pickNcuDirectory.disabled = true;
@@ -1125,18 +1204,54 @@ elements.announcementForm.addEventListener("submit", async (event) => {
     toast(error.message, "error");
   }
 });
-elements.registrationOpen.addEventListener("change", async () => {
+
+elements.registrationMode.addEventListener("change", async () => {
   try {
     const res = await api("/api/admin/settings", {
       method: "POST",
-      body: JSON.stringify({ registration_open: elements.registrationOpen.checked }),
+      body: JSON.stringify({ registration_mode: elements.registrationMode.value }),
     });
-    session.registrationOpen = res.registration_open;
-    toast(res.registration_open ? "已开放注册" : "已关闭注册");
+    session.registrationMode = res.registration_mode;
+    toast("Registration mode updated");
   } catch (error) {
     toast(error.message, "error");
-    elements.registrationOpen.checked = !elements.registrationOpen.checked;
   }
+});
+elements.maintenanceToggle.addEventListener("change", async () => {
+  try {
+    const res = await api("/api/admin/settings", {
+      method: "POST",
+      body: JSON.stringify({ maintenance: elements.maintenanceToggle.checked }),
+    });
+    elements.maintenanceBanner.classList.toggle("hidden", !res.maintenance);
+    toast(res.maintenance ? "Maintenance on — submissions paused" : "Maintenance off");
+  } catch (error) {
+    toast(error.message, "error");
+    elements.maintenanceToggle.checked = !elements.maintenanceToggle.checked;
+  }
+});
+elements.addUserForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({
+        username: elements.addUsername.value.trim(),
+        password: elements.addPassword.value,
+        role: elements.addRole.value,
+      }),
+    });
+    elements.addUsername.value = "";
+    elements.addPassword.value = "";
+    await loadAdminUsers();
+    toast("User added");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+});
+elements.langToggle.addEventListener("click", () => {
+  const next = window.I18N.toggle();
+  toast(next === "zh" ? "已切换到中文" : "Switched to English");
 });
 document.querySelectorAll("[data-admin-tab]").forEach((button) => {
   button.addEventListener("click", () => {

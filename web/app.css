@@ -73,8 +73,8 @@ a:focus-visible {
   height: var(--header-height);
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 0 14px;
+  gap: 14px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: #151815;
 }
@@ -1046,6 +1046,13 @@ a:focus-visible {
   font-size: 11px;
 }
 
+/* In multi-user mode the leaderboard name comes from the account —
+   hide the free-form runner field. */
+body.authed .runner-field { display: none; }
+
+/* GPU widget hidden until system info loads. */
+.gpu-widget:not(.loaded) { display: none; }
+
 .profile-toggle {
   display: flex;
   align-items: center;
@@ -1578,3 +1585,88 @@ a:focus-visible {
   font-family: inherit;
 }
 .username-label { color: var(--muted); }
+
+/* ---------- gpu widget ---------- */
+.gpu-widget {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--faint);
+  font-family: monospace;
+  font-size: 11px;
+}
+.gpu-widget .lucide { width: 14px; height: 14px; }
+.gpu-bars { display: flex; flex-direction: column; gap: 3px; }
+.gpu-bar {
+  width: 72px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.gpu-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: var(--green);
+  transition: width .4s ease, background .4s ease;
+}
+.gpu-bar-fill.mem { background: var(--cyan); }
+.gpu-bar-fill.hot { background: var(--amber); }
+.gpu-bar-fill.crit { background: var(--red); }
+.gpu-label { min-width: 34px; text-align: right; }
+
+/* ---------- maintenance banner ---------- */
+.maintenance-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--amber-soft);
+  border-bottom: 1px solid var(--amber);
+  color: var(--amber);
+  font-size: 13px;
+}
+.maintenance-banner .lucide { width: 15px; height: 15px; }
+
+/* ---------- admin controls ---------- */
+.admin-controls { display: flex; flex-direction: column; gap: 12px; }
+.admin-field { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.admin-field select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.admin-add-user {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.admin-add-user input, .admin-add-user select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+.admin-add-user input { flex: 1 1 120px; min-width: 0; }
+.admin-actions { display: flex; gap: 4px; }
+.pending-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 11px;
+  margin-left: 6px;
+}

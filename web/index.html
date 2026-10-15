@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/app.css" />
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+    <script src="/static/i18n.js" defer></script>
     <script src="/static/vim.js" defer></script>
     <script src="/static/app.js" defer></script>
   </head>
@@ -23,10 +24,28 @@
         </div>
         <div class="system-status" id="system-status">
           <span class="status-dot"></span>
-          <span class="system-name">检测 GPU</span>
+          <span class="system-name" data-i18n="nav.gpu_check">检测 GPU</span>
+        </div>
+        <div class="gpu-widget" id="gpu-widget" title="GPU 实时状态">
+          <i data-lucide="activity"></i>
+          <div class="gpu-bars">
+            <div class="gpu-bar">
+              <div class="gpu-bar-fill" id="gpu-util-fill"></div>
+            </div>
+            <span class="gpu-label" id="gpu-util-label">--%</span>
+          </div>
+          <div class="gpu-bars">
+            <div class="gpu-bar mem">
+              <div class="gpu-bar-fill mem" id="gpu-mem-fill"></div>
+            </div>
+            <span class="gpu-label" id="gpu-mem-label">--%</span>
+          </div>
         </div>
         <div class="topbar-actions">
-          <span class="queue-state" id="queue-state">空闲</span>
+          <span class="queue-state" id="queue-state" data-i18n="nav.idle">空闲</span>
+          <button class="icon-button" id="lang-toggle" title="Switch language / 切换语言" aria-label="language">
+            <i data-lucide="languages"></i>
+          </button>
           <button class="icon-button" id="vim-toggle" title="Vim 模式" aria-label="Vim 模式">
             <i data-lucide="keyboard"></i>
           </button>
@@ -40,7 +59,7 @@
           <a class="icon-button" href="/api/challenges" target="_blank" title="API" aria-label="API">
             <i data-lucide="braces"></i>
           </a>
-          <button class="auth-button hidden" id="login-button">登录</button>
+          <button class="auth-button hidden" id="login-button" data-i18n="nav.login">登录</button>
           <button class="auth-button hidden" id="user-menu-button">
             <i data-lucide="user-round"></i><span id="username-label"></span>
           </button>
@@ -51,25 +70,28 @@
       </header>
 
       <div class="announcements-bar hidden" id="announcements-bar"></div>
+      <div class="maintenance-banner hidden" id="maintenance-banner">
+        <i data-lucide="wrench"></i><span data-i18n="maint.banner">维护模式：暂停提交，可浏览题目</span>
+      </div>
 
       <div class="workspace">
         <aside class="sidebar" id="sidebar">
           <div class="sidebar-head">
             <label class="search-field">
               <i data-lucide="search"></i>
-              <input id="challenge-search" type="search" placeholder="搜索题目" autocomplete="off" />
+              <input id="challenge-search" type="search" data-i18n-placeholder="sidebar.search" placeholder="搜索题目" autocomplete="off" />
             </label>
             <div class="difficulty-filter" role="group" aria-label="难度">
-              <button class="active" data-difficulty="all">全部</button>
-              <button data-difficulty="easy">简单</button>
-              <button data-difficulty="medium">中等</button>
-              <button data-difficulty="hard">困难</button>
+              <button class="active" data-difficulty="all" data-i18n="sidebar.all">全部</button>
+              <button data-difficulty="easy" data-i18n="sidebar.easy">简单</button>
+              <button data-difficulty="medium" data-i18n="sidebar.medium">中等</button>
+              <button data-difficulty="hard" data-i18n="sidebar.hard">困难</button>
             </div>
           </div>
           <nav class="challenge-list" id="challenge-list" aria-label="题目列表"></nav>
           <div class="sidebar-foot">
             <span id="challenge-count">0 道题</span>
-            <span>本地题库</span>
+            <span data-i18n="sidebar.local_repo">本地题库</span>
           </div>
         </aside>
 
@@ -96,14 +118,14 @@
             <section class="information-pane">
               <div class="view-tabs" role="tablist">
                 <button class="active" data-view="problem">
-                  <i data-lucide="file-text"></i><span>题目</span>
+                  <i data-lucide="file-text"></i><span data-i18n="tab.description">题目</span>
                 </button>
                 <button data-view="results">
-                  <i data-lucide="terminal-square"></i><span>运行结果</span>
+                  <i data-lucide="terminal-square"></i><span data-i18n="tab.results">运行结果</span>
                   <span class="tab-indicator" id="result-indicator"></span>
                 </button>
                 <button data-view="leaderboard">
-                  <i data-lucide="trophy"></i><span>排行榜</span>
+                  <i data-lucide="trophy"></i><span data-i18n="tab.leaderboard">排行榜</span>
                 </button>
               </div>
 
@@ -141,13 +163,12 @@
                 <div class="table-wrap">
                   <table class="leaderboard-table">
                     <thead>
-                      <tr>
-                        <th>排名</th>
-                        <th>名称</th>
-                        <th>用户</th>
-                        <th>语言</th>
-                        <th>中位耗时</th>
-                        <th>最佳耗时</th>
+                        <th data-i18n="lb.rank">排名</th>
+                        <th data-i18n="lb.name">名称</th>
+                        <th data-i18n="lb.user">用户</th>
+                        <th data-i18n="lb.lang">语言</th>
+                        <th data-i18n="lb.median">中位 (ms)</th>
+                        <th data-i18n="lb.min">最短 (ms)</th>
                         <th>提交时间</th>
                         <th></th>
                       </tr>
@@ -203,11 +224,11 @@
                 </label>
                 <button class="test-button" id="test-button">
                   <i data-lucide="flask-conical"></i>
-                  <span>测试</span>
+                  <span data-i18n="editor.test">测试</span>
                 </button>
                 <button class="run-button" id="run-button">
                   <i data-lucide="send"></i>
-                  <span>提交并计分</span>
+                  <span data-i18n="editor.submit">提交并计分</span>
                 </button>
               </div>
             </section>
@@ -294,31 +315,54 @@
 
     <dialog class="modal admin-modal" id="admin-modal">
       <div class="modal-head">
-        <h2>站点管理</h2>
+        <h2 data-i18n="admin.title">站点管理</h2>
         <button class="icon-button" data-close-dialog="admin-modal" aria-label="关闭">
           <i data-lucide="x"></i>
         </button>
       </div>
       <div class="admin-tabs">
-        <button class="active" data-admin-tab="announcements">公告</button>
-        <button data-admin-tab="users">用户</button>
+        <button class="active" data-admin-tab="announcements" data-i18n="admin.announcements">公告</button>
+        <button data-admin-tab="users" data-i18n="admin.users">用户</button>
+        <button data-admin-tab="pending" data-i18n="admin.pending">待审核</button>
       </div>
       <div class="admin-body">
         <div class="admin-pane active" id="admin-announcements">
           <form id="announcement-form">
-            <input id="announcement-title" placeholder="标题" maxlength="120" required />
-            <textarea id="announcement-body" placeholder="内容（支持 Markdown 文本）" rows="4" maxlength="4000" required></textarea>
-            <button type="submit" class="primary-button">发布公告</button>
+            <input id="announcement-title" data-i18n-placeholder="admin.title_ph" placeholder="标题" maxlength="120" required />
+            <textarea id="announcement-body" data-i18n-placeholder="admin.body_ph" placeholder="内容" rows="4" maxlength="4000" required></textarea>
+            <button type="submit" class="primary-button" data-i18n="admin.publish">发布公告</button>
           </form>
           <div id="admin-announcements-list"></div>
         </div>
         <div class="admin-pane" id="admin-users">
-          <label class="profile-toggle">
-            <input id="registration-open" type="checkbox" />
-            <span class="toggle-track"><span></span></span>
-            <span>开放注册</span>
-          </label>
+          <div class="admin-controls">
+            <label class="admin-field">
+              <span data-i18n="admin.reg_mode">注册方式</span>
+              <select id="registration-mode">
+                <option value="open" data-i18n="admin.reg_open">开放注册</option>
+                <option value="review" data-i18n="admin.reg_review">注册需审核</option>
+                <option value="closed" data-i18n="admin.reg_closed">关闭注册</option>
+              </select>
+            </label>
+            <label class="profile-toggle">
+              <input id="maintenance-toggle" type="checkbox" />
+              <span class="toggle-track"><span></span></span>
+              <span data-i18n="admin.maintenance">维护模式（暂停提交）</span>
+            </label>
+          </div>
+          <form class="admin-add-user" id="add-user-form">
+            <input id="add-username" data-i18n-placeholder="auth.username" placeholder="用户名" maxlength="32" required />
+            <input id="add-password" type="password" data-i18n-placeholder="auth.password" placeholder="密码" minlength="6" required />
+            <select id="add-role">
+              <option value="user" data-i18n="admin.role_user">普通用户</option>
+              <option value="admin" data-i18n="admin.role_admin">管理员</option>
+            </select>
+            <button type="submit" class="primary-button" data-i18n="admin.add_user">手动添加用户</button>
+          </form>
           <div id="admin-users-list"></div>
+        </div>
+        <div class="admin-pane" id="admin-pending">
+          <div id="admin-pending-list"><div class="empty-state">暂无待审核用户</div></div>
         </div>
       </div>
     </dialog>
