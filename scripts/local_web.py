@@ -43,6 +43,11 @@ STARTER_FILES = {
     "pytorch": "starter.pytorch.py",
 }
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
+JOB_TIMEOUT_SAFETY = 30
+LOGIN_ATTEMPT_LIMIT = 6
+LOGIN_ATTEMPT_WINDOW = 60.0
+LOGIN_LOCK_SECONDS = 300
+MAX_QUEUED_PER_USER = 8
 
 
 def utc_now() -> str:
@@ -875,12 +880,18 @@ class JobManager:
             raise ValueError(f"Unsupported run mode: {mode}")
         if not source.strip():
             raise ValueError("Source code is empty")
-        encoded = source.encode("utf-8")
-        if len(encoded) > MAX_SOURCE_BYTES:
-            raise ValueError("Source code exceeds 2 MiB")
-        runner_name = re.sub(r"[^\w .-]", "", runner_name, flags=re.UNICODE).strip()[:32]
-        if not runner_name:
-            runner_name = "local"
+        if username:
+            with self.lock:
+                queued = sum(
+                    1
+                    for j in self.jobs.values()
+                    if j.get("username") == username
+                    and j.get("status") in {"queued", "running"}
+                )
+            if queued >= MAX_QUEUED_PER_USER:
+                raise ValueError(
+                    f"最多同时排 {MAX_QUEUED_PER_USER} 个任务，等前面的跑完再提交"
+                )
 
         job_id = uuid.uuid4().hex[:12]
         challenge_dir_name = filesystem_name(
@@ -993,6 +1004,9 @@ class JobManager:
         if job_dir.is_dir():
             shutil.rmtree(job_dir)
         job_dir.mkdir(parents=True, exist_ok=False)
+        if self.sandbox:
+            # Container runs as nobody(65534); /work must be writable by it.
+            job_dir.chmod(0o777)
         solution = job_dir / pending_solution.name
         shutil.copy2(pending_solution, solution)
         with self.lock:
@@ -1002,7 +1016,8 @@ class JobManager:
         )
         if self.sandbox:
             command = self._sandbox_command(
-                challenge, solution, job["language"], job["mode"], profile
+                challenge, solution, job["language"], job["mode"], profile,
+                job_id=job_id,
             )
         else:
             command = [
@@ -1046,6 +1061,13 @@ class JobManager:
             def _kill():
                 nonlocal timed_out
                 timed_out = True
+                # Killing the docker CLI client leaves the container alive;
+                # the named container must be removed explicitly.
+                subprocess.run(
+                    ["docker", "rm", "-f", f"lgj-{job_id}"],
+                    capture_output=True,
+                    check=False,
+                )
                 process.kill()
             timer = threading.Timer(self.sandbox_timeout, _kill)
             timer.start()
@@ -1102,6 +1124,7 @@ class JobManager:
         language: str,
         mode: str,
         profile: str,
+        job_id: str,
     ) -> List[str]:
         challenges_dir = self.catalog.challenges_dir
         challenge_rel = Path(challenge["path"]).relative_to(challenges_dir)
@@ -1122,19 +1145,21 @@ class JobManager:
             "--ncu-launch-count",
             str(self.ncu_launch_count),
         ]
-        uid, gid = os.getuid(), os.getgid()
+        # uid 65534 = nobody: 逃逸容器后无 docker socket 权限、不落在宿主用户身上。
         return [
             "docker", "run", "--rm", "-i",
+            "--name", f"lgj-{job_id}",
             "--network", "none",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
             "--read-only",
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=2g",
+            "--ipc", "none",
             "--pids-limit", "256",
             "--memory", "8g",
             "--cpus", "4",
             "--gpus", "all",
-            "--user", f"{uid}:{gid}",
+            "--user", "65534:65534",
             "--workdir", "/work",
             "-e", "HOME=/tmp",
             "-e", "PYTHONDONTWRITEBYTECODE=1",
@@ -1296,6 +1321,24 @@ class RequestHandler(BaseHTTPRequestHandler):
         return value
 
     # ---- auth ----
+
+    def _client_ip(self) -> str:
+        # Behind a reverse proxy the real client is the first XFF hop.
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return self.client_address[0]
+
+    def _login_throttled(self) -> bool:
+        ip = self._client_ip()
+        with self.server.login_lock:
+            attempts = self.server.login_attempts.setdefault(ip, [])
+            now = time.time()
+            attempts[:] = [t for t in attempts if now - t < LOGIN_ATTEMPT_WINDOW]
+            if len(attempts) >= LOGIN_ATTEMPT_LIMIT:
+                return True
+            attempts.append(now)
+            return False
 
     def _session_token(self) -> str:
         cookie = self.headers.get("Cookie", "")
@@ -1464,13 +1507,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                     cookie=token,
                 )
             elif parsed.path == "/api/auth/login":
+                if self._login_throttled():
+                    self.send_error_json(
+                        HTTPStatus.TOO_MANY_REQUESTS,
+                        "登录尝试过多，请稍后再试",
+                    )
+                    return
                 body = self.read_json()
                 user = self.app.users.verify_login(
                     str(body.get("username", "")).strip(),
                     str(body.get("password", "")),
                 )
                 if user is None:
-                    time.sleep(0.5)  # basic brute-force throttle
                     raise PermissionError("用户名或密码错误")
                 token = self.app.users.create_session(user["username"])
                 self.send_json({"user": user}, cookie=token)
@@ -1647,6 +1695,8 @@ class ApplicationServer(ThreadingHTTPServer):
         super().__init__(address, handler)
         self.app = app
         self.secure_cookies = secure_cookies
+        self.login_attempts: Dict[str, List[float]] = {}
+        self.login_lock = threading.Lock()
 
 
 def build_parser() -> argparse.ArgumentParser:
