@@ -24,20 +24,18 @@
         </div>
         <div class="system-status" id="system-status">
           <span class="status-dot"></span>
-          <span class="system-name" data-i18n="nav.gpu_check">检测 GPU</span>
+          <span class="system-name">Checking GPU</span>
         </div>
-        <div class="gpu-widget" id="gpu-widget" title="GPU 实时状态">
+        <div class="gpu-widget" id="gpu-widget">
           <i data-lucide="activity"></i>
-          <div class="gpu-bars">
-            <div class="gpu-bar">
-              <div class="gpu-bar-fill" id="gpu-util-fill"></div>
-            </div>
+          <div class="gpu-metric">
+            <span class="gpu-tag">UTIL</span>
+            <div class="gpu-bar"><div class="gpu-bar-fill" id="gpu-util-fill"></div></div>
             <span class="gpu-label" id="gpu-util-label">--%</span>
           </div>
-          <div class="gpu-bars">
-            <div class="gpu-bar mem">
-              <div class="gpu-bar-fill mem" id="gpu-mem-fill"></div>
-            </div>
+          <div class="gpu-metric">
+            <span class="gpu-tag">VRAM</span>
+            <div class="gpu-bar mem"><div class="gpu-bar-fill mem" id="gpu-mem-fill"></div></div>
             <span class="gpu-label" id="gpu-mem-label">--%</span>
           </div>
         </div>
@@ -210,22 +208,22 @@
                   spellcheck="false"
                   wrap="off"
                 ></textarea>
-                <span class="vim-mode" id="vim-mode"></span>
               </div>
               <div class="submission-bar">
                 <label class="runner-field">
                   <i data-lucide="user-round"></i>
                   <input id="runner-name" maxlength="32" value="local" aria-label="排行榜名称" />
                 </label>
+                <span class="vim-mode" id="vim-mode"></span>
+                <button class="test-button" id="test-button">
+                  <i data-lucide="flask-conical"></i>
+                  <span data-i18n="editor.test">测试</span>
+                </button>
                 <label class="profile-toggle">
                   <input id="profile-enabled" type="checkbox" checked />
                   <span class="toggle-track"><span></span></span>
                   <span>Nsight</span>
                 </label>
-                <button class="test-button" id="test-button">
-                  <i data-lucide="flask-conical"></i>
-                  <span data-i18n="editor.test">测试</span>
-                </button>
                 <button class="run-button" id="run-button">
                   <i data-lucide="send"></i>
                   <span data-i18n="editor.submit">提交并计分</span>

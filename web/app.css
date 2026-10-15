@@ -1520,23 +1520,23 @@ body.authed .runner-field { display: none; }
 .auth-button:hover { border-color: var(--accent); }
 
 .vim-mode {
-  position: absolute;
-  bottom: 10px;
-  right: 14px;
   font-family: monospace;
   font-size: 11px;
   color: var(--green);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 8px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  margin-left: auto;
+  min-width: 74px;
+  text-align: center;
+  visibility: hidden;
 }
-.vim-mode.on { opacity: 1; }
+.vim-mode.on { visibility: visible; }
 .vim-normal { caret-color: var(--green); }
 #vim-toggle.active { color: var(--green); border-color: var(--green); }
+
+/* The vim-mode pill carries the right-side anchor now. */
+.submission-bar .test-button { margin-left: 0; }
+
+/* Nsight toggle right-aligned next to submit. */
+.submission-bar .profile-toggle { margin-left: 0; }
 
 .announcements-bar {
   padding: 8px 16px;
@@ -1609,9 +1609,10 @@ body.authed .runner-field { display: none; }
   font-size: 11px;
 }
 .gpu-widget .lucide { width: 14px; height: 14px; }
-.gpu-bars { display: flex; flex-direction: column; gap: 3px; }
+.gpu-metric { display: flex; align-items: center; gap: 6px; }
+.gpu-tag { font-size: 9px; color: var(--faint); letter-spacing: 0.5px; }
 .gpu-bar {
-  width: 72px;
+  width: 64px;
   height: 5px;
   border-radius: 3px;
   background: var(--border);
@@ -1622,12 +1623,12 @@ body.authed .runner-field { display: none; }
   width: 0%;
   border-radius: 3px;
   background: var(--green);
-  transition: width .4s ease, background .4s ease;
+  transition: width .6s cubic-bezier(.4,0,.2,1), background .4s ease;
 }
 .gpu-bar-fill.mem { background: var(--cyan); }
 .gpu-bar-fill.hot { background: var(--amber); }
 .gpu-bar-fill.crit { background: var(--red); }
-.gpu-label { min-width: 34px; text-align: right; }
+.gpu-label { min-width: 32px; font-size: 10px; }
 
 /* ---------- maintenance banner ---------- */
 .maintenance-banner {
