@@ -307,7 +307,7 @@ class ScoreStore:
                     """,
                     (
                         job["id"],
-                        job.get("username", ""),
+                        job.get("username") or job.get("runner_name") or "local",
                         job["challenge"],
                         result.get("challenge", job["challenge"]),
                         job["runner_name"],
@@ -337,7 +337,7 @@ class ScoreStore:
         query = f"""
             WITH personal_best AS (
                 SELECT *, ROW_NUMBER() OVER (
-                    PARTITION BY username, runner_name, language
+                    PARTITION BY username, language
                     ORDER BY median_ms ASC, created_at ASC
                 ) AS personal_rank
                 FROM scores
@@ -387,7 +387,7 @@ class ScoreStore:
                     """,
                     (
                         job["id"],
-                        job.get("username", ""),
+                        job.get("username") or job.get("runner_name") or "local",
                         job["challenge"],
                         job["runner_name"],
                         job["language"],
@@ -1219,6 +1219,7 @@ class WebApplication:
         judge_image: str = "leetgpu-judge",
         sandbox_timeout: int = 600,
         auth_required: bool = False,
+        site_name: str = "LeetGPU Local",
     ):
         self.root = root.resolve()
         self.web_root = self.root / "web"
@@ -1227,6 +1228,7 @@ class WebApplication:
         self.users = MultiuserStore(data_dir / "users.sqlite3")
         self.sandbox = sandbox
         self.auth_required = auth_required or sandbox
+        self.site_name = site_name
         self.jobs = JobManager(
             self.root, data_dir, self.catalog, self.scores,
             sandbox=sandbox, judge_image=judge_image, sandbox_timeout=sandbox_timeout,
@@ -1396,6 +1398,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "registration_open": self.app.registration_open(),
                     "registration_mode": self.app.registration_mode(),
                     "maintenance": self.app.users.site_setting("maintenance") == "1",
+                    "site_name": self.app.site_name,
                 })
             elif parsed.path == "/api/announcements":
                 self.send_json({"announcements": self.app.users.announcements()})
@@ -1791,6 +1794,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument(
+        "--site-name",
+        default="LeetGPU Local",
+        help="Product name shown in the UI, browser tab and logs.",
+    )
     return parser
 
 
@@ -1824,6 +1832,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             judge_image=args.judge_image,
             sandbox_timeout=args.sandbox_timeout,
             auth_required=args.auth,
+            site_name=args.site_name,
         )
     except (FileNotFoundError, ValueError) as exc:
         parser.error(str(exc))
@@ -1831,7 +1840,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         (args.host, args.port), RequestHandler, app, secure_cookies=args.secure_cookies
     )
     url = f"http://{args.host}:{args.port}"
-    LOGGER.info("LeetGPU Local is running at %s", url)
+    LOGGER.info("%s is running at %s", args.site_name, url)
     LOGGER.info("Challenges: %s", challenges_dir)
     LOGGER.info("Python: %s", sys.executable)
     if not args.no_browser:

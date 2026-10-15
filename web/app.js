@@ -233,7 +233,17 @@ async function refreshSession() {
   session.user = me.user;
   session.authRequired = me.auth_required;
   session.registrationOpen = me.registration_open;
+  session.registrationMode = me.registration_mode;
+  if (me.site_name) applySiteName(me.site_name);
   renderAuthState();
+}
+
+function applySiteName(name) {
+  session.siteName = name;
+  document.title = name;
+  document.querySelectorAll("[data-site-name]").forEach((el) => {
+    el.textContent = name;
+  });
 }
 
 function draftKey() {
@@ -610,6 +620,18 @@ function formatMs(value) {
   return `${number < 1 ? number.toFixed(4) : number.toFixed(3)} ms`;
 }
 
+/** Short, locale-aware timestamp that fits the leaderboard column. */
+function formatTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function renderInputVariables(inputs) {
   return Object.entries(inputs || {})
     .map(([name, summary]) => {
@@ -795,7 +817,8 @@ async function openSubmission(jobId) {
   try {
     const submission = await api(`/api/leaderboard/source?job=${encodeURIComponent(jobId)}`);
     state.selectedSubmission = submission;
-    elements.submissionModalTitle.textContent = `${submission.challenge_name} · ${submission.runner_name}`;
+    elements.submissionModalTitle.textContent =
+      `${submission.challenge_name} · ${submission.username || submission.runner_name}`;
     elements.submissionModalMeta.textContent =
       `${submission.language.toUpperCase()} · ${formatMs(submission.median_ms)} · ${submission.solution_filename}`;
     elements.submissionSource.textContent = submission.source_code;
@@ -827,23 +850,28 @@ async function loadLeaderboard() {
       `/api/leaderboard?challenge=${encodeURIComponent(state.currentKey)}&language=${encodeURIComponent(language)}`,
     );
     elements.leaderboardBody.innerHTML = data.scores
-      .map(
-        (score) => `
+      .map((score) => {
+        const mine =
+          session.user &&
+          (session.user.role === "admin" || session.user.username === score.username);
+        return `
           <tr class="leaderboard-row" data-job-id="${score.job_id}">
             <td class="rank-cell ${score.rank <= 3 ? "top" : ""}">#${score.rank}</td>
-            <td>${escapeHtml(score.runner_name)}</td>
             <td class="username-label">${escapeHtml(score.username || "—")}</td>
             <td class="language-label">${escapeHtml(score.language)}</td>
             <td>${formatMs(score.median_ms)}</td>
-            <td>${formatMs(score.min_ms)}</td>
-            <td>${new Date(score.created_at).toLocaleString()}</td>
+            <td class="time-cell" title="${escapeHtml(new Date(score.created_at).toLocaleString())}">${formatTimestamp(score.created_at)}</td>
             <td class="leaderboard-actions">
-              <button class="icon-button" data-delete-job="${score.job_id}" title="${I18N.t("lb.delete_title")}" aria-label="${I18N.t("lb.delete_title")}">
-                <i data-lucide="trash-2"></i>
-              </button>
+              ${
+                mine
+                  ? `<button class="icon-button" data-delete-job="${score.job_id}" title="${I18N.t("lb.delete_title")}" aria-label="${I18N.t("lb.delete_title")}">
+                       <i data-lucide="trash-2"></i>
+                     </button>`
+                  : ""
+              }
             </td>
-          </tr>`,
-      )
+          </tr>`;
+      })
       .join("");
     elements.leaderboardBody.querySelectorAll(".leaderboard-row").forEach((row) => {
       row.addEventListener("click", () => openSubmission(row.dataset.jobId));

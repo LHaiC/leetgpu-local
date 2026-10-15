@@ -36,7 +36,6 @@
       "editor.edited": "已编辑",
       // leaderboard
       "lb.rank": "排名",
-      "lb.name": "名称",
       "lb.user": "用户",
       "lb.lang": "语言",
       "lb.gpu": "GPU",
@@ -212,7 +211,6 @@
       "editor.saved": "Saved",
       "editor.edited": "Edited",
       "lb.rank": "Rank",
-      "lb.name": "Name",
       "lb.user": "User",
       "lb.lang": "Lang",
       "lb.gpu": "GPU",

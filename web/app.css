@@ -863,7 +863,6 @@ a:focus-visible {
 
 .leaderboard-table {
   width: 100%;
-  min-width: 620px;
   border-collapse: collapse;
   font-size: 11px;
 }
@@ -2015,3 +2014,37 @@ body {
 
 /* The full-page version was hidden behind opaque panels — remove it. */
 body { background-image: none; }
+
+/* Leaderboard: keep every column (incl. the row action) on screen. */
+.leaderboard-table { width: 100%; }
+.leaderboard-table th,
+.leaderboard-table td { padding: 10px 10px; }
+.leaderboard-table .time-cell { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.leaderboard-actions { width: 34px; text-align: right; }
+.leaderboard-actions .icon-button { width: 26px; height: 26px; }
+
+/* Leaderboard column budget: user truncates, numbers never wrap. */
+.leaderboard-table td,
+.leaderboard-table th { padding: 10px 9px; }
+.leaderboard-table .username-label {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.leaderboard-table td:nth-child(4) { white-space: nowrap; }
+
+/* Fixed column budget so the leaderboard always fits its pane
+   (including the row action) instead of overflowing. */
+.leaderboard-table { table-layout: fixed; width: 100%; }
+.leaderboard-table th:nth-child(1) { width: 42px; }
+.leaderboard-table th:nth-child(2) { width: 22%; }
+.leaderboard-table th:nth-child(3) { width: 15%; }
+.leaderboard-table th:nth-child(4) { width: 19%; }
+.leaderboard-table th:nth-child(5) { width: 33%; }
+.leaderboard-table th:nth-child(6) { width: 34px; }
+.leaderboard-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.leaderboard-table th { white-space: nowrap; }

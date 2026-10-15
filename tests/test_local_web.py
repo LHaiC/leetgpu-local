@@ -39,7 +39,7 @@ class ChallengeCatalogTest(unittest.TestCase):
 
 
 class ScoreStoreTest(unittest.TestCase):
-    def test_leaderboard_keeps_each_runner_language_best(self):
+    def test_leaderboard_keeps_each_owner_language_best(self):
         with tempfile.TemporaryDirectory() as temporary:
             store = ScoreStore(Path(temporary) / "scores.sqlite3")
             self.record(store, "one", "alice", "cuda", 2.0)
