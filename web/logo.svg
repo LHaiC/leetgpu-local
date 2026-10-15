@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="LeetGPU">
+  <rect x="3.5" y="3.5" width="25" height="25" rx="7" fill="#48c774"/>
+  <g fill="#0e1210">
+    <rect x="0.5" y="11" width="3" height="3" rx="1"/>
+    <rect x="0.5" y="18" width="3" height="3" rx="1"/>
+    <rect x="28.5" y="11" width="3" height="3" rx="1"/>
+    <rect x="28.5" y="18" width="3" height="3" rx="1"/>
+    <rect x="11" y="0.5" width="3" height="3" rx="1"/>
+    <rect x="18" y="0.5" width="3" height="3" rx="1"/>
+    <rect x="11" y="28.5" width="3" height="3" rx="1"/>
+    <rect x="18" y="28.5" width="3" height="3" rx="1"/>
+  </g>
+  <path d="M18.9 7.4 9.6 19.1h5.6l-1.5 5.6 9.3-11.7h-5.6z" fill="#0e1210"/>
+</svg>

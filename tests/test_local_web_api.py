@@ -63,6 +63,31 @@ class LocalWebApiTest(unittest.TestCase):
 
         self.assertEqual(context.exception.code, 400)
 
+    def test_submission_is_accepted(self):
+        body = json.dumps(
+            {
+                "challenge": "easy/1_synthetic_addition",
+                "language": "cuda",
+                "source": "extern \"C\" void solve() {}",
+                "runner_name": "tester",
+                "mode": "test",
+            }
+        ).encode("utf-8")
+        request = Request(
+            f"{self.base_url}/api/jobs",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+
+        with urlopen(request, timeout=5) as response:
+            job = json.load(response)
+
+        self.assertEqual(response.status, 202)
+        self.assertTrue(job["id"])
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(job["mode"], "test")
+
     def get_json(self, path):
         with urlopen(f"{self.base_url}{path}", timeout=5) as response:
             return json.load(response)

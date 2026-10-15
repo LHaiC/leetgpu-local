@@ -50,6 +50,15 @@ LOGIN_LOCK_SECONDS = 300
 MAX_QUEUED_PER_USER = 8
 
 
+class ApiError(Exception):
+    """An error with a stable code so the UI can render it in any language."""
+
+    def __init__(self, message: str, status: int = 400, code: str = ""):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -545,9 +554,9 @@ class MultiuserStore:
         self, username: str, password: str, role: str = "user", approved: bool = True
     ) -> Dict[str, Any]:
         if not USERNAME_PATTERN.match(username):
-            raise ValueError("用户名只能包含字母、数字、_ . -，长度 2-32")
+            raise ApiError("Username must be 2-32 characters: letters, digits, _ . -", code="username_format")
         if len(password) < 6:
-            raise ValueError("密码至少 6 位")
+            raise ApiError("Password must be at least 6 characters", code="password_short")
         with closing(self._connect()) as connection:
             with connection:
                 try:
@@ -563,7 +572,7 @@ class MultiuserStore:
                         ),
                     )
                 except sqlite3.IntegrityError:
-                    raise ValueError("用户名已被使用")
+                    raise ApiError("Username already taken", code="username_taken")
         return {"username": username, "role": role}
 
     def get_user(self, username: str) -> Optional[Dict[str, Any]]:
@@ -626,7 +635,7 @@ class MultiuserStore:
 
     def admin_reset_password(self, username: str, new_password: str) -> bool:
         if len(new_password) < 6:
-            raise ValueError("密码至少 6 位")
+            raise ApiError("Password must be at least 6 characters", code="password_short")
         with closing(self._connect()) as connection:
             with connection:
                 cursor = connection.execute(
@@ -669,9 +678,9 @@ class MultiuserStore:
     def change_password(self, username: str, old: str, new: str) -> bool:
         user = self.verify_login(username, old)
         if user is None:
-            raise ValueError("原密码错误")
+            raise ApiError("Current password is incorrect", code="old_password_wrong")
         if len(new) < 6:
-            raise ValueError("新密码至少 6 位")
+            raise ApiError("New password must be at least 6 characters", code="password_short")
         with closing(self._connect()) as connection:
             with connection:
                 connection.execute(
@@ -740,7 +749,7 @@ class MultiuserStore:
     def add_announcement(self, title: str, body: str, author: str) -> Dict[str, Any]:
         title, body = title.strip(), body.strip()
         if not title:
-            raise ValueError("公告标题不能为空")
+            raise ApiError("Announcement title is required", code="title_required")
         with closing(self._connect()) as connection:
             with connection:
                 cursor = connection.execute(
@@ -860,6 +869,9 @@ class JobManager:
             raise ValueError(f"Unsupported run mode: {mode}")
         if not source.strip():
             raise ValueError("Source code is empty")
+        encoded = source.encode("utf-8")
+        if len(encoded) > MAX_SOURCE_BYTES:
+            raise ApiError("Source code exceeds 2 MiB", code="source_too_large")
         if username:
             with self.lock:
                 queued = sum(
@@ -869,8 +881,9 @@ class JobManager:
                     and j.get("status") in {"queued", "running"}
                 )
             if queued >= MAX_QUEUED_PER_USER:
-                raise ValueError(
-                    f"最多同时排 {MAX_QUEUED_PER_USER} 个任务，等前面的跑完再提交"
+                raise ApiError(
+                    f"At most {MAX_QUEUED_PER_USER} queued jobs per user; wait for the queue to drain",
+                    code="queue_full",
                 )
 
         job_id = uuid.uuid4().hex[:12]
@@ -878,7 +891,9 @@ class JobManager:
             f"{challenge_info['id']}_{challenge_info['title']}", challenge_info["slug"]
         )
         submission_dir_name = filesystem_name(runner_name, "local")
-        job_dir = self.data_dir / "runs" / challenge_dir_name / submission_dir_name
+        job_dir = (
+            self.data_dir / "runs" / challenge_dir_name / submission_dir_name / job_id
+        )
         pending_dir = self.data_dir / ".pending" / job_id
         job = {
             "id": job_id,
@@ -919,7 +934,10 @@ class JobManager:
             job.pop("job_dir", None)
             job.pop("pending_dir", None)
             job.pop("source_code", None)
-            job["output"] = job["output"][-50_000:]
+            job.pop("result_path", None)
+            job["output"] = self.scrub(job["output"][-50_000:])
+            if job.get("error"):
+                job["error"] = self.scrub(job["error"])
             if job["status"] == "queued":
                 queued = list(self.pending.queue)
                 job["queue_position"] = queued.index(job_id) + 1 if job_id in queued else 1
@@ -942,9 +960,21 @@ class JobManager:
         return matches[-1] if matches else None
 
     def _append_output(self, job_id: str, line: str) -> None:
+        line = self.scrub(line)
         with self.lock:
             job = self.jobs[job_id]
             job["output"] = (job["output"] + line)[-100_000:]
+
+    def scrub(self, text: str) -> str:
+        """Strip host-specific paths so the UI never leaks local layout."""
+        if not text:
+            return text
+        for host, placeholder in (
+            (str(self.root), "/app"),
+            (str(self.data_dir), "/data"),
+        ):
+            text = text.replace(host, placeholder)
+        return text
 
     def _work(self) -> None:
         while True:
@@ -978,14 +1008,15 @@ class JobManager:
             job_dir = Path(job["job_dir"])
             pending_solution = Path(job["solution_path"])
         challenge = self.catalog.require(job["challenge"])
-        if job_dir.is_dir():
-            shutil.rmtree(job_dir)
+        # Each job owns a fresh directory, so no pre-run cleanup is needed
+        # and concurrent submissions can never read each other's output.
         job_dir.mkdir(parents=True, exist_ok=False)
         if self.sandbox:
-            # Container runs as nobody(65534); /work must be writable by it.
+            # The container runs as an unprivileged uid; /work must be writable.
             job_dir.chmod(0o777)
         solution = job_dir / pending_solution.name
         shutil.copy2(pending_solution, solution)
+        os.chmod(solution, 0o644)
         with self.lock:
             job["solution_path"] = str(solution)
         if self.sandbox:
@@ -1098,7 +1129,10 @@ class JobManager:
         challenges_dir = self.catalog.challenges_dir
         challenge_rel = Path(challenge["path"]).relative_to(challenges_dir)
         inner = [
-            "python3",
+            "sh",
+            "-c",
+            'python3 "$@" ; rc=$? ; chmod -R a+rwX /work 2>/dev/null ; exit $rc',
+            "entry",
             "/judge/repo/scripts/local_runner.py",
             f"/judge/challenges/{challenge_rel.as_posix()}",
             "--language",
@@ -1153,7 +1187,6 @@ def system_info() -> Dict[str, Any]:
         "gpu": name,
         "driver": driver,
         "memory_mb": int(memory),
-        "python": sys.executable,
     }
 
 def gpu_stats() -> Dict[str, Any]:
@@ -1247,8 +1280,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_error_json(self, status: int, message: str) -> None:
-        self.send_json({"error": message}, status=status)
+    def send_error_json(self, status: int, message: str, code: Optional[str] = None) -> None:
+        payload: Dict[str, Any] = {"error": message}
+        if code:
+            payload["code"] = code
+        self.send_json(payload, status=status)
 
     def send_file(self, path: Path, attachment: bool = False) -> None:
         if not path.is_file():
@@ -1317,13 +1353,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             return {"username": "", "role": "admin"}
         user = self.current_user()
         if user is None:
-            raise PermissionError("需要登录")
+            raise ApiError("Login required", status=401, code="login_required")
         return user
 
     def require_admin(self) -> Dict[str, Any]:
         user = self.require_user()
         if user["role"] != "admin":
-            raise PermissionError("需要管理员权限")
+            raise ApiError("Admin permission required", status=403, code="admin_required")
         return user
 
     def set_session_cookie(self, token: str, max_age: int = SESSION_TTL_SECONDS) -> None:
@@ -1390,7 +1426,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     user["role"] != "admin"
                     and submission.get("username", "") != user["username"]
                 ):
-                    raise PermissionError("只能查看自己的源码")
+                    raise ApiError("You can only view your own source", status=403, code="own_source_only")
                 self.send_json(submission)
             elif parsed.path == "/api/solutions":
                 user = self.require_user()
@@ -1419,7 +1455,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 job_id = parts[2] if len(parts) >= 3 else ""
                 job = self.app.jobs.public(job_id)
                 if user["role"] != "admin" and job.get("username", "") != user["username"]:
-                    raise PermissionError("只能查看自己的任务")
+                    raise ApiError("You can only view your own job", status=403, code="own_job_only")
                 if len(parts) == 3:
                     self.send_json(job)
                 elif len(parts) == 5 and parts[3] == "artifacts":
@@ -1440,6 +1476,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.send_file(self.app.web_root / relative)
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Not found")
+        except ApiError as exc:
+            self.send_error_json(exc.status, str(exc), exc.code)
         except PermissionError as exc:
             status = (
                 HTTPStatus.UNAUTHORIZED
@@ -1490,7 +1528,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if self._login_throttled():
                     self.send_error_json(
                         HTTPStatus.TOO_MANY_REQUESTS,
-                        "登录尝试过多，请稍后再试",
+                        "Too many login attempts, try again later",
+                        code="too_many_attempts",
                     )
                     return
                 body = self.read_json()
@@ -1499,9 +1538,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                     str(body.get("password", "")),
                 )
                 if user is None:
-                    raise PermissionError("用户名或密码错误")
+                    raise ApiError("Incorrect username or password", status=403, code="bad_credentials")
                 if isinstance(user, dict) and user.get("pending"):
-                    self.send_error_json(HTTPStatus.FORBIDDEN, "账号待管理员审核")
+                    self.send_error_json(
+                        HTTPStatus.FORBIDDEN,
+                        "Account pending admin approval",
+                        code="pending_approval",
+                    )
                     return
                 token = self.app.users.create_session(user["username"])
                 self.send_json({"user": user}, cookie=token)
@@ -1528,7 +1571,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if self.app.users.site_setting("maintenance") == "1":
                     self.send_error_json(
                         HTTPStatus.SERVICE_UNAVAILABLE,
-                        "站点维护中，暂停提交",
+                        "Submissions are paused for maintenance",
+                        code="maintenance",
                     )
                     return
                 body = self.read_json()
@@ -1613,6 +1657,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 })
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown API path")
+        except ApiError as exc:
+            self.send_error_json(exc.status, str(exc), exc.code)
         except PermissionError as exc:
             status = (
                 HTTPStatus.UNAUTHORIZED
@@ -1638,7 +1684,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 user = self.require_user()
                 entry = self.app.scores.submission(parts[2])
                 if user["role"] != "admin" and entry.get("username", "") != user["username"]:
-                    raise PermissionError("只能删除自己的成绩")
+                    raise ApiError("You can only delete your own score", status=403, code="own_entry_only")
                 deleted = self.app.scores.delete(parts[2])
                 if not deleted:
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Leaderboard entry not found")
@@ -1675,6 +1721,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"deleted": self.app.users.delete_user(parts[3])})
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown API path")
+        except ApiError as exc:
+            self.send_error_json(exc.status, str(exc), exc.code)
         except PermissionError as exc:
             status = (
                 HTTPStatus.UNAUTHORIZED

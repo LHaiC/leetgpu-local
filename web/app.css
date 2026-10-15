@@ -76,7 +76,8 @@ a:focus-visible {
   gap: 14px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
-  background: #151815;
+  background: rgba(21, 24, 21, 0.82);
+  backdrop-filter: blur(10px);
 }
 
 .brand {
@@ -89,15 +90,12 @@ a:focus-visible {
 }
 
 .brand-mark {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  border: 1px solid #3d694c;
-  border-radius: 5px;
-  color: var(--green);
-  background: var(--green-soft);
 }
+.brand-mark img { display: block; }
 
 .brand-mark svg,
 .icon-button svg,
@@ -1794,3 +1792,226 @@ body.authed .runner-field { display: none; }
 
 /* Auth modal actions: link left, primary right. */
 .auth-form .modal-actions { justify-content: space-between; }
+
+/* ============================================================
+   Editor — highlight layer, hints, scroll hygiene
+   ============================================================ */
+.editor-code {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.highlight-layer,
+.highlight-layer code {
+  font-family: Consolas, "Cascadia Code", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 4;
+  letter-spacing: normal;
+}
+
+.highlight-layer {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 15px 16px 40px;
+  border: 0;
+  overflow: hidden;
+  background: transparent;
+  color: #e3e8e3;
+  white-space: pre;
+  word-wrap: normal;
+  pointer-events: none;
+}
+.highlight-layer code { display: block; }
+
+#code-editor {
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  background: transparent;
+  caret-color: var(--green);
+  z-index: 1;
+}
+#code-editor::selection { background: rgba(72, 199, 116, 0.28); }
+
+/* token palette */
+.tok-comment { color: #69786a; font-style: italic; }
+.tok-string { color: #c3e88d; }
+.tok-preproc { color: #c792ea; }
+.tok-number { color: #f78c6c; }
+.tok-keyword { color: #82aaff; font-weight: 600; }
+.tok-type { color: #ffcb6b; }
+.tok-builtin { color: #89ddff; }
+.tok-call { color: #dcdcaa; }
+.tok-punct { color: #93a1a1; }
+
+/* completion popup */
+.hint-popup {
+  position: absolute;
+  z-index: 6;
+  min-width: 168px;
+  max-height: 208px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+.hint-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.hint-item.active { background: var(--green-soft); }
+.hint-badge { width: 13px; height: 13px; border-radius: 3px; background: var(--border-strong); }
+.hint-badge.kw { background: #3b5ea8; }
+.hint-badge.fn { background: #2e6b57; }
+.hint-badge.ty { background: #8a6a2f; }
+.hint-label { font-family: Consolas, monospace; color: var(--text); }
+
+/* ============================================================
+   Scroll hygiene — no stray horizontal scrollbars
+   ============================================================ */
+.workspace,
+.main-area,
+.content-grid,
+.information-pane,
+.editor-pane,
+.challenge-bar,
+.view-content,
+.problem-body,
+.editor-toolbar,
+.submission-bar {
+  min-width: 0;
+}
+.topbar { overflow: hidden; }
+.brand { flex-shrink: 0; }
+.system-status,
+.gpu-widget { flex-shrink: 0; }
+.topbar-actions { flex-shrink: 0; }
+
+/* slim, unobtrusive scrollbars throughout */
+* { scrollbar-width: thin; scrollbar-color: #39413a transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 10px;
+  background-clip: content-box;
+  background-color: #39413a;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: #4b554c; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* ============================================================
+   Results view — carded layout with breathing room
+   ============================================================ */
+#results-view { padding: 18px 20px 26px; }
+
+.result-summary {
+  min-height: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+.result-summary .empty-state { padding: 12px 0; color: var(--faint); }
+.result-state { gap: 12px; }
+.result-state-icon { width: 36px; height: 36px; border-radius: 8px; }
+.result-state strong { font-size: 14px; font-weight: 600; }
+.result-state span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+
+.metrics-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 14px 0 0;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surface-raised);
+}
+.metric { padding: 13px 16px; }
+.metric-label { font-size: 10px; letter-spacing: 0.5px; }
+.metric-value { margin-top: 5px; font-size: 16px; }
+
+.test-results { margin: 14px 0 0; border-radius: 9px; }
+.compiler-panel { margin: 14px 0 0; border-radius: 9px; }
+.artifact-bar { margin: 14px 0 0; gap: 8px; }
+.artifact-link {
+  padding: 7px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.execution-output {
+  min-height: 120px;
+  margin: 14px 0 0;
+  padding: 14px;
+  border-radius: 9px;
+  font-size: 11px;
+}
+
+/* ============================================================
+   Technical background — subtle grid + vignette (kept very low
+   contrast so code and text keep full legibility).
+   ============================================================ */
+body {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1100px 620px at 18% -10%, rgba(72, 199, 116, 0.07), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(87, 184, 199, 0.05), transparent 62%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.016) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.016) 0 1px, transparent 1px 32px);
+  background-attachment: fixed;
+}
+/* Panels stay opaque so the texture never bleeds under text. */
+.sidebar,
+.information-pane,
+.editor-pane,
+.topbar,
+.submission-bar { background-clip: padding-box; }
+
+/* ============================================================
+   Technical texture — placed on the canvases that are actually
+   visible (editor + doc/table areas), not behind opaque panels.
+   Kept low-contrast so code and prose stay fully legible.
+   ============================================================ */
+:root {
+  --grid-line: rgba(255, 255, 255, 0.075);
+  --grid-size: 32px;
+}
+
+.editor-code,
+.problem-body,
+.results-view,
+.leaderboard-view {
+  background-image:
+    linear-gradient(0deg, var(--grid-line) 0 1px, transparent 1px var(--grid-size)),
+    linear-gradient(90deg, var(--grid-line) 0 1px, transparent 1px var(--grid-size));
+  background-position: -1px -1px;
+}
+
+/* Soft radial glow so the editor canvas reads as lit, not flat.
+   Sits below the highlight layer, textarea and popup (z-index 1+). */
+.editor-code::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(680px 380px at 12% -8%, rgba(72, 199, 116, 0.07), transparent 62%),
+    radial-gradient(560px 320px at 100% 110%, rgba(87, 184, 199, 0.055), transparent 60%);
+}
+.highlight-layer,
+.editor-code > #code-editor,
+.editor-code > .hint-popup { z-index: 1; }
+
+/* The full-page version was hidden behind opaque panels — remove it. */
+body { background-image: none; }

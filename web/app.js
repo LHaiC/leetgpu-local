@@ -13,6 +13,9 @@ const elements = {
   difficultyBadge: document.querySelector("#difficulty-badge"),
   draftState: document.querySelector("#draft-state"),
   executionOutput: document.querySelector("#execution-output"),
+  highlightCode: document.querySelector("#highlight-code"),
+  highlightLayer: document.querySelector("#highlight-layer"),
+  hintPopup: document.querySelector("#hint-popup"),
   languageSwitch: document.querySelector(".language-switch"),
   leaderboardBody: document.querySelector("#leaderboard-body"),
   leaderboardEmpty: document.querySelector("#leaderboard-empty"),
@@ -141,7 +144,12 @@ async function api(path, options = {}) {
       renderAuthState();
       openAuthModal();
     }
-    throw new Error(body.error || `HTTP ${response.status}`);
+    const translated = body.code ? I18N.t(`err.${body.code}`) : "";
+    const message =
+      translated && translated !== `err.${body.code}`
+        ? translated
+        : body.error || `HTTP ${response.status}`;
+    throw new Error(message);
   }
   return body;
 }
@@ -243,6 +251,23 @@ function updateLineNumbers() {
   );
 }
 
+/** Repaint the highlight layer behind the textarea and keep scroll in sync. */
+function updateHighlight() {
+  if (!window.CodeHighlight || !elements.highlightCode) return;
+  elements.highlightCode.innerHTML = window.CodeHighlight.highlight(
+    elements.codeEditor.value,
+    state.language,
+  );
+  syncEditorScroll();
+}
+
+function syncEditorScroll() {
+  const source = elements.codeEditor;
+  elements.highlightLayer.scrollTop = source.scrollTop;
+  elements.highlightLayer.scrollLeft = source.scrollLeft;
+  elements.lineNumbers.scrollTop = source.scrollTop;
+}
+
 function saveDraft() {
   if (!state.currentKey) return;
   const source = elements.codeEditor.value;
@@ -313,6 +338,7 @@ function applyEditorHistory(index) {
   state.editorHistory.applying = false;
   elements.draftState.textContent = "edited";
   updateLineNumbers();
+  updateHighlight();
   updateHistoryButtons();
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(saveDraft, 200);
@@ -338,6 +364,7 @@ function updateHistoryButtons() {
 function recordEditorEdit(forceNew = false) {
   recordEditorHistory(forceNew);
   updateLineNumbers();
+  updateHighlight();
   elements.draftState.textContent = "edited";
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(saveDraft, 500);
@@ -442,10 +469,22 @@ async function loadCode() {
     server !== null ? "server" : local === null ? "starter" : "saved";
   elements.solutionFilename.textContent = filenames[state.language];
   updateLineNumbers();
+  updateHighlight();
   elements.codeEditor.scrollTop = 0;
   elements.lineNumbers.scrollTop = 0;
+  elements.highlightLayer.scrollTop = 0;
+  elements.highlightLayer.scrollLeft = 0;
   resetEditorHistory();
+  if (hints) hints.close();
 }
+
+const hints = window.CodeHighlight
+  ? window.CodeHighlight.attachHints(
+      elements.codeEditor,
+      elements.hintPopup,
+      () => state.language,
+    )
+  : null;
 
 function renderChallengeList() {
   const search = elements.challengeSearch.value.trim().toLowerCase();
@@ -1038,9 +1077,7 @@ elements.codeEditor.addEventListener("beforeinput", (event) => {
     else redoEditor();
   }
 });
-elements.codeEditor.addEventListener("scroll", () => {
-  elements.lineNumbers.scrollTop = elements.codeEditor.scrollTop;
-});
+elements.codeEditor.addEventListener("scroll", syncEditorScroll);
 elements.codeEditor.addEventListener("keydown", (event) => {
   const modifier = event.ctrlKey || event.metaKey;
   if (modifier && event.key.toLowerCase() === "z") {
