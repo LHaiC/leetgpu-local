@@ -47,6 +47,38 @@ const elements = {
   toastRegion: document.querySelector("#toast-region"),
   undoCode: document.querySelector("#undo-code"),
   viewTabs: document.querySelector(".view-tabs"),
+  adminButton: document.querySelector("#admin-button"),
+  adminModal: document.querySelector("#admin-modal"),
+  announcementsBar: document.querySelector("#announcements-bar"),
+  authForm: document.querySelector("#auth-form"),
+  authModal: document.querySelector("#auth-modal"),
+  authModalTitle: document.querySelector("#auth-modal-title"),
+  authSubmit: document.querySelector("#auth-submit"),
+  authSwitch: document.querySelector("#auth-switch"),
+  authConfirmWrap: document.querySelector("#auth-confirm-wrap"),
+  authConfirm: document.querySelector("#auth-confirm"),
+  authError: document.querySelector("#auth-error"),
+  authUsername: document.querySelector("#auth-username"),
+  authPassword: document.querySelector("#auth-password"),
+  loginButton: document.querySelector("#login-button"),
+  logoutButton: document.querySelector("#logout-button"),
+  userMenuButton: document.querySelector("#user-menu-button"),
+  usernameLabel: document.querySelector("#username-label"),
+  registrationOpen: document.querySelector("#registration-open"),
+  adminUsersList: document.querySelector("#admin-users-list"),
+  adminAnnouncementsList: document.querySelector("#admin-announcements-list"),
+  announcementForm: document.querySelector("#announcement-form"),
+  announcementTitle: document.querySelector("#announcement-title"),
+  announcementBody: document.querySelector("#announcement-body"),
+  vimToggle: document.querySelector("#vim-toggle"),
+  vimMode: document.querySelector("#vim-mode"),
+};
+
+const session = {
+  user: null,
+  authRequired: false,
+  registrationOpen: true,
+  authMode: "login",
 };
 
 const state = {
@@ -93,9 +125,15 @@ async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    credentials: "same-origin",
   });
-  const body = await response.json();
+  const body = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401 && session.authRequired) {
+      session.user = null;
+      renderAuthState();
+      openAuthModal();
+    }
     throw new Error(body.error || `HTTP ${response.status}`);
   }
   return body;
@@ -107,6 +145,79 @@ function toast(message, type = "info") {
   node.textContent = message;
   elements.toastRegion.append(node);
   setTimeout(() => node.remove(), 4200);
+}
+
+// ---------- auth ----------
+
+function renderAuthState() {
+  const loggedIn = !!session.user;
+  elements.loginButton.classList.toggle("hidden", loggedIn || !session.authRequired);
+  elements.userMenuButton.classList.toggle("hidden", !loggedIn);
+  elements.logoutButton.classList.toggle("hidden", !loggedIn);
+  elements.adminButton.classList.toggle(
+    "hidden",
+    !(loggedIn && session.user.role === "admin"),
+  );
+  if (loggedIn) elements.usernameLabel.textContent = session.user.username;
+  refreshIcons();
+}
+
+function openAuthModal(mode = "login") {
+  session.authMode = mode;
+  elements.authModalTitle.textContent = mode === "login" ? "登录" : "注册";
+  elements.authSubmit.textContent = mode === "login" ? "登录" : "注册";
+  elements.authSwitch.textContent =
+    mode === "login" ? "没有账号？注册" : "已有账号？登录";
+  elements.authSwitch.style.display =
+    mode === "login" && !session.registrationOpen ? "none" : "";
+  elements.authConfirmWrap.classList.toggle("hidden", mode === "login");
+  elements.authError.textContent = "";
+  elements.authModal.showModal();
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  const username = elements.authUsername.value.trim();
+  const password = elements.authPassword.value;
+  elements.authError.textContent = "";
+  try {
+    if (session.authMode === "register") {
+      if (password !== elements.authConfirm.value) {
+        throw new Error("两次输入的密码不一致");
+      }
+      await api("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+    } else {
+      await api("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+    }
+    elements.authModal.close();
+    await refreshSession();
+    initialize();
+  } catch (error) {
+    elements.authError.textContent = error.message;
+  }
+}
+
+async function logout() {
+  try {
+    await api("/api/auth/logout", { method: "POST", body: "{}" });
+  } finally {
+    session.user = null;
+    location.reload();
+  }
+}
+
+async function refreshSession() {
+  const me = await api("/api/me");
+  session.user = me.user;
+  session.authRequired = me.auth_required;
+  session.registrationOpen = me.registration_open;
+  renderAuthState();
 }
 
 function draftKey() {
@@ -126,8 +237,19 @@ function updateLineNumbers() {
 
 function saveDraft() {
   if (!state.currentKey) return;
-  localStorage.setItem(draftKey(), elements.codeEditor.value);
+  const source = elements.codeEditor.value;
+  localStorage.setItem(draftKey(), source);
   elements.draftState.textContent = "saved";
+  if (session.user) {
+    api("/api/solutions", {
+      method: "POST",
+      body: JSON.stringify({
+        challenge: state.currentKey,
+        language: state.language,
+        source,
+      }),
+    }).catch(() => {});
+  }
 }
 
 function editorSnapshot() {
@@ -295,10 +417,21 @@ function toggleLineComments() {
   recordEditorEdit(true);
 }
 
-function loadCode() {
-  const saved = localStorage.getItem(draftKey());
-  elements.codeEditor.value = saved ?? currentStarter();
-  elements.draftState.textContent = saved === null ? "starter" : "saved";
+async function loadCode() {
+  const local = localStorage.getItem(draftKey());
+  let server = null;
+  if (session.user) {
+    try {
+      const data = await api(
+        `/api/solution?challenge=${encodeURIComponent(state.currentKey)}&language=${encodeURIComponent(state.language)}`,
+      );
+      server = data.source;
+    } catch {}
+  }
+  const source = server ?? local ?? currentStarter();
+  elements.codeEditor.value = source;
+  elements.draftState.textContent =
+    server !== null ? "server" : local === null ? "starter" : "saved";
   elements.solutionFilename.textContent = filenames[state.language];
   updateLineNumbers();
   elements.codeEditor.scrollTop = 0;
@@ -687,6 +820,7 @@ async function loadLeaderboard() {
           <tr class="leaderboard-row" data-job-id="${score.job_id}">
             <td class="rank-cell ${score.rank <= 3 ? "top" : ""}">#${score.rank}</td>
             <td>${escapeHtml(score.runner_name)}</td>
+            <td class="username-label">${escapeHtml(score.username || "—")}</td>
             <td class="language-label">${escapeHtml(score.language)}</td>
             <td>${formatMs(score.median_ms)}</td>
             <td>${formatMs(score.min_ms)}</td>
@@ -713,6 +847,97 @@ async function loadLeaderboard() {
   } catch (error) {
     toast(error.message, "error");
   }
+}
+
+// ---------- announcements & admin ----------
+
+async function loadAnnouncements() {
+  try {
+    const data = await api("/api/announcements");
+    const items = data.announcements || [];
+    elements.announcementsBar.classList.toggle("hidden", items.length === 0);
+    elements.announcementsBar.innerHTML = items
+      .slice(0, 3)
+      .map(
+        (a) => `
+        <div class="announcement">
+          <span class="announcement-title">${escapeHtml(a.title)}</span>
+          <span class="announcement-body">${escapeHtml(a.body)}</span>
+          <span class="announcement-meta">${escapeHtml(a.author)} · ${new Date(a.created_at).toLocaleDateString()}</span>
+        </div>`,
+      )
+      .join("");
+  } catch {}
+}
+
+async function loadAdminAnnouncements() {
+  try {
+    const data = await api("/api/announcements");
+    elements.adminAnnouncementsList.innerHTML = (data.announcements || [])
+      .map(
+        (a) => `
+        <div class="admin-row">
+          <span class="admin-row-main">${escapeHtml(a.title)}</span>
+          <button class="icon-button" data-del-ann="${a.id}" title="删除">
+            <i data-lucide="trash-2"></i>
+          </button>
+        </div>`,
+      )
+      .join("");
+    elements.adminAnnouncementsList
+      .querySelectorAll("[data-del-ann]")
+      .forEach((b) =>
+        b.addEventListener("click", async () => {
+          await api(`/api/admin/announcements/${b.dataset.delAnn}`, { method: "DELETE" });
+          await loadAdminAnnouncements();
+          await loadAnnouncements();
+        }),
+      );
+    refreshIcons();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function loadAdminUsers() {
+  try {
+    const data = await api("/api/admin/users");
+    elements.adminUsersList.innerHTML = data.users
+      .map(
+        (u) => `
+        <div class="admin-row">
+          <span class="admin-row-main">
+            ${escapeHtml(u.username)}
+            <span class="admin-role">${u.role}${u.disabled ? " · 已禁用" : ""}</span>
+          </span>
+          <button class="icon-button" data-toggle-user="${escapeHtml(u.username)}" data-disabled="${u.disabled ? 1 : 0}"
+                  title="${u.disabled ? "启用" : "禁用"}">
+            <i data-lucide="${u.disabled ? "user-check" : "user-x"}"></i>
+          </button>
+        </div>`,
+      )
+      .join("");
+    elements.adminUsersList
+      .querySelectorAll("[data-toggle-user]")
+      .forEach((b) =>
+        b.addEventListener("click", async () => {
+          const action = b.dataset.disabled === "1" ? "enable" : "disable";
+          await api(`/api/admin/users/${b.dataset.toggleUser}/${action}`, { method: "DELETE" });
+          await loadAdminUsers();
+        }),
+      );
+    refreshIcons();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function openAdmin() {
+  elements.adminModal.showModal();
+  elements.registrationOpen.checked = session.registrationOpen;
+  await loadAdminAnnouncements();
+  await loadAdminUsers();
+  refreshIcons();
 }
 
 async function saveSettings() {
@@ -749,6 +974,12 @@ async function pickNcuDirectory() {
 async function initialize() {
   refreshIcons();
   elements.runnerName.value = localStorage.getItem("leetgpu.runner") || "local";
+  await refreshSession().catch(() => {});
+  if (session.authRequired && !session.user) {
+    openAuthModal();
+    return;
+  }
+  loadAnnouncements();
   try {
     const [challengeData, system, settings] = await Promise.all([
       api("/api/challenges"),
@@ -865,5 +1096,67 @@ document.querySelectorAll("dialog").forEach((dialog) => {
     if (event.target === dialog) dialog.close();
   });
 });
+
+// ---------- auth / admin / vim listeners ----------
+
+elements.loginButton.addEventListener("click", () => openAuthModal("login"));
+elements.logoutButton.addEventListener("click", logout);
+elements.authForm.addEventListener("submit", submitAuth);
+elements.authSwitch.addEventListener("click", () => {
+  openAuthModal(session.authMode === "login" ? "register" : "login");
+});
+elements.adminButton.addEventListener("click", openAdmin);
+elements.announcementForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/admin/announcements", {
+      method: "POST",
+      body: JSON.stringify({
+        title: elements.announcementTitle.value,
+        body: elements.announcementBody.value,
+      }),
+    });
+    elements.announcementTitle.value = "";
+    elements.announcementBody.value = "";
+    await loadAdminAnnouncements();
+    await loadAnnouncements();
+    toast("公告已发布");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+});
+elements.registrationOpen.addEventListener("change", async () => {
+  try {
+    const res = await api("/api/admin/settings", {
+      method: "POST",
+      body: JSON.stringify({ registration_open: elements.registrationOpen.checked }),
+    });
+    session.registrationOpen = res.registration_open;
+    toast(res.registration_open ? "已开放注册" : "已关闭注册");
+  } catch (error) {
+    toast(error.message, "error");
+    elements.registrationOpen.checked = !elements.registrationOpen.checked;
+  }
+});
+document.querySelectorAll("[data-admin-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-admin-tab]").forEach((b) =>
+      b.classList.toggle("active", b === button),
+    );
+    document.querySelectorAll(".admin-pane").forEach((p) =>
+      p.classList.toggle("active", p.id === `admin-${button.dataset.adminTab}`),
+    );
+  });
+});
+elements.vimToggle.addEventListener("click", () => {
+  const on = window.LeetGPUVim && window.LeetGPUVim.toggle();
+  elements.vimToggle.classList.toggle("active", !!on);
+  elements.vimMode.classList.toggle("hidden", !on);
+  toast(on ? "Vim 模式已开启" : "Vim 模式已关闭");
+});
+if (window.LeetGPUVim && window.LeetGPUVim.enabled) {
+  elements.vimToggle.classList.add("active");
+  elements.vimMode.classList.remove("hidden");
+}
 
 initialize();

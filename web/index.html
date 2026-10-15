@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/app.css" />
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+    <script src="/static/vim.js" defer></script>
     <script src="/static/app.js" defer></script>
   </head>
   <body>
@@ -26,14 +27,30 @@
         </div>
         <div class="topbar-actions">
           <span class="queue-state" id="queue-state">空闲</span>
+          <button class="icon-button" id="vim-toggle" title="Vim 模式" aria-label="Vim 模式">
+            <i data-lucide="keyboard"></i>
+          </button>
+          <span class="vim-mode hidden" id="vim-mode"></span>
+          <button class="icon-button hidden" id="admin-button" title="管理" aria-label="管理">
+            <i data-lucide="shield"></i>
+          </button>
           <button class="icon-button" id="settings-button" title="设置" aria-label="设置">
             <i data-lucide="settings"></i>
           </button>
           <a class="icon-button" href="/api/challenges" target="_blank" title="API" aria-label="API">
             <i data-lucide="braces"></i>
           </a>
+          <button class="auth-button hidden" id="login-button">登录</button>
+          <button class="auth-button hidden" id="user-menu-button">
+            <i data-lucide="user-round"></i><span id="username-label"></span>
+          </button>
+          <button class="icon-button hidden" id="logout-button" title="登出" aria-label="登出">
+            <i data-lucide="log-out"></i>
+          </button>
         </div>
       </header>
+
+      <div class="announcements-bar hidden" id="announcements-bar"></div>
 
       <div class="workspace">
         <aside class="sidebar" id="sidebar">
@@ -127,6 +144,7 @@
                       <tr>
                         <th>排名</th>
                         <th>名称</th>
+                        <th>用户</th>
                         <th>语言</th>
                         <th>中位耗时</th>
                         <th>最佳耗时</th>
@@ -232,6 +250,7 @@
       </div>
       <div class="settings-body">
         <label for="ncu-export-dir">NCU 报告保存目录</label>
+
         <div class="path-field">
           <input id="ncu-export-dir" autocomplete="off" />
           <button class="icon-button" id="pick-ncu-directory" title="选择目录" aria-label="选择目录">
@@ -243,6 +262,64 @@
         <button class="primary-button" id="save-settings">
           <i data-lucide="save"></i><span>保存设置</span>
         </button>
+      </div>
+    </dialog>
+    <dialog class="modal auth-modal" id="auth-modal">
+      <div class="modal-head">
+        <h2 id="auth-modal-title">登录</h2>
+        <button class="icon-button" data-close-dialog="auth-modal" aria-label="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <form class="auth-form" id="auth-form" method="dialog">
+        <label>
+          <span>用户名</span>
+          <input id="auth-username" autocomplete="username" required minlength="2" maxlength="32" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="auth-password" type="password" autocomplete="current-password" required minlength="6" />
+        </label>
+        <label class="hidden" id="auth-confirm-wrap">
+          <span>确认密码</span>
+          <input id="auth-confirm" type="password" autocomplete="new-password" minlength="6" />
+        </label>
+        <div class="auth-error" id="auth-error"></div>
+        <div class="modal-actions">
+          <button type="button" class="ghost-button" id="auth-switch">没有账号？注册</button>
+          <button type="submit" class="primary-button" id="auth-submit">登录</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal admin-modal" id="admin-modal">
+      <div class="modal-head">
+        <h2>站点管理</h2>
+        <button class="icon-button" data-close-dialog="admin-modal" aria-label="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="admin-tabs">
+        <button class="active" data-admin-tab="announcements">公告</button>
+        <button data-admin-tab="users">用户</button>
+      </div>
+      <div class="admin-body">
+        <div class="admin-pane active" id="admin-announcements">
+          <form id="announcement-form">
+            <input id="announcement-title" placeholder="标题" maxlength="120" required />
+            <textarea id="announcement-body" placeholder="内容（支持 Markdown 文本）" rows="4" maxlength="4000" required></textarea>
+            <button type="submit" class="primary-button">发布公告</button>
+          </form>
+          <div id="admin-announcements-list"></div>
+        </div>
+        <div class="admin-pane" id="admin-users">
+          <label class="profile-toggle">
+            <input id="registration-open" type="checkbox" />
+            <span class="toggle-track"><span></span></span>
+            <span>开放注册</span>
+          </label>
+          <div id="admin-users-list"></div>
+        </div>
       </div>
     </dialog>
   </body>

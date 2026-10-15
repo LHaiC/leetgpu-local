@@ -1495,3 +1495,86 @@ a:focus-visible {
     display: none;
   }
 }
+
+/* ---------- auth / admin / announcements / vim ---------- */
+
+.auth-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+.auth-button:hover { border-color: var(--accent); }
+
+.vim-mode {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--accent);
+  min-width: 76px;
+  text-align: center;
+}
+.vim-normal { caret-color: var(--accent); }
+#vim-toggle.active { color: var(--accent); border-color: var(--accent); }
+
+.announcements-bar {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.announcement { display: flex; gap: 10px; align-items: baseline; font-size: 13px; }
+.announcement-title { font-weight: 600; color: var(--accent); }
+.announcement-body { color: var(--fg); flex: 1; }
+.announcement-meta { color: var(--muted); font-size: 12px; }
+
+.auth-form { display: flex; flex-direction: column; gap: 12px; min-width: 280px; }
+.auth-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.auth-form input {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+}
+.auth-error { color: var(--error, #f66); font-size: 12px; min-height: 14px; }
+
+.admin-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.admin-tabs button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.admin-tabs button.active { color: var(--fg); border-color: var(--accent); }
+.admin-pane { display: none; }
+.admin-pane.active { display: flex; flex-direction: column; gap: 10px; }
+.admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.admin-row-main { display: flex; align-items: center; gap: 8px; }
+.admin-role { color: var(--muted); font-size: 12px; }
+#announcement-form { display: flex; flex-direction: column; gap: 8px; }
+#announcement-form input, #announcement-form textarea {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: inherit;
+}
+.username-label { color: var(--muted); }

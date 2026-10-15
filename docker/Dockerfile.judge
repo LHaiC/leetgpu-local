@@ -1,0 +1,30 @@
+# LeetGPU judge sandbox image.
+#
+# Contains only what is needed to compile and run user submissions:
+# CUDA toolkit (nvcc), Python, torch, triton. No SSH, no shells required,
+# no project code baked in — the runner and challenges are bind-mounted
+# read-only at job time.
+#
+# Build:
+#   docker build -f docker/Dockerfile.judge -t leetgpu-judge .
+
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# cu126 wheels match the CUDA 12.6 toolkit in this image. Triton wheels ship
+# their own ptxas so the toolkit version and triton stay consistent.
+RUN pip3 install --no-cache-dir --break-system-packages \
+        torch --index-url https://download.pytorch.org/whl/cu126 \
+    && pip3 install --no-cache-dir --break-system-packages \
+        triton numpy
+
+# Non-root, network-isolated execution is enforced via `docker run` flags in
+# scripts/local_web.py (--network none, --cap-drop ALL, --read-only).
+ENTRYPOINT []
+CMD ["python3", "--version"]

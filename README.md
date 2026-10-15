@@ -1,5 +1,18 @@
 # LeetGPU Local
 
+> **Fork 说明（LHaiC）**：本仓库在 [xicheng-han/leetgpu-local](https://github.com/xicheng-han/leetgpu-local)
+> 之上增加了多用户功能：
+>
+> - **注册登录**：`--auth` 开启；首个注册用户自动成为管理员；公告、解法云端保存、每题排行榜按用户名区分。
+> - **公告**：管理员在「站点管理」里发布/删除，用户端顶部横幅显示。
+> - **安全判题沙箱**：`--sandbox` 将每个提交丢进 `--network none --cap-drop ALL --read-only` 的
+>   Docker 容器（镜像 `leetgpu-judge`，见 `docker/`）；管理员可关/开注册、禁用用户。
+> - **Vim 编辑器**：顶栏键盘图标切换，支持 normal/insert/visual、hjkl/w/b/0/$/gg/G、d/y/c、dd/yy/cc、o/O、p、u/Ctrl-R、计数前缀。
+>
+> 部署多人服务见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+> 不带 `--auth`/`--sandbox` 启动时行为与上游一致（单机、无登录、无沙箱）。
+
+
 > **项目定位 / Project scope**
 >
 > LeetGPU Local 只是

@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import hmac
 import json
 import logging
 import mimetypes
 import os
 import queue
 import re
+import secrets
 import shutil
 import sqlite3
 import subprocess
@@ -160,6 +162,7 @@ class ScoreStore:
                     """
                     CREATE TABLE IF NOT EXISTS scores (
                         job_id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL DEFAULT '',
                         challenge_key TEXT NOT NULL,
                         challenge_name TEXT NOT NULL,
                         runner_name TEXT NOT NULL,
@@ -184,6 +187,7 @@ class ScoreStore:
                     """
                     CREATE TABLE IF NOT EXISTS submission_attempts (
                         job_id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL DEFAULT '',
                         challenge_key TEXT NOT NULL,
                         runner_name TEXT NOT NULL,
                         language TEXT NOT NULL,
@@ -201,14 +205,40 @@ class ScoreStore:
                 connection.execute(
                     """
                     INSERT OR IGNORE INTO submission_attempts (
-                        job_id, challenge_key, runner_name, language, status,
+                        job_id, username, challenge_key, runner_name, language, status,
                         result_status, created_at, finished_at
                     )
-                    SELECT job_id, challenge_key, runner_name, language, 'completed',
+                    SELECT job_id, '', challenge_key, runner_name, language, 'completed',
                            'passed', created_at, created_at
                     FROM scores
                     """
                 )
+                columns = {
+                    row[1] for row in connection.execute("PRAGMA table_info(scores)").fetchall()
+                }
+                if "username" not in columns:
+                    connection.execute(
+                        "ALTER TABLE scores ADD COLUMN username TEXT NOT NULL DEFAULT ''"
+                    )
+                if "source_code" not in columns:
+                    connection.execute(
+                        "ALTER TABLE scores ADD COLUMN source_code TEXT NOT NULL DEFAULT ''"
+                    )
+                if "solution_filename" not in columns:
+                    connection.execute(
+                        "ALTER TABLE scores ADD COLUMN solution_filename TEXT NOT NULL DEFAULT ''"
+                    )
+                attempt_columns = {
+                    row[1]
+                    for row in connection.execute(
+                        "PRAGMA table_info(submission_attempts)"
+                    ).fetchall()
+                }
+                if "username" not in attempt_columns:
+                    connection.execute(
+                        "ALTER TABLE submission_attempts "
+                        "ADD COLUMN username TEXT NOT NULL DEFAULT ''"
+                    )
                 columns = {
                     row[1] for row in connection.execute("PRAGMA table_info(scores)").fetchall()
                 }
@@ -256,13 +286,14 @@ class ScoreStore:
                 connection.execute(
                     """
                     INSERT OR REPLACE INTO scores (
-                        job_id, challenge_key, challenge_name, runner_name, language,
-                        gpu_name, median_ms, min_ms, p95_ms, source_hash, source_code,
-                        solution_filename, created_at, result_path
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        job_id, username, challenge_key, challenge_name, runner_name,
+                        language, gpu_name, median_ms, min_ms, p95_ms, source_hash,
+                        source_code, solution_filename, created_at, result_path
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job["id"],
+                        job.get("username", ""),
                         job["challenge"],
                         result.get("challenge", job["challenge"]),
                         job["runner_name"],
@@ -292,12 +323,13 @@ class ScoreStore:
         query = f"""
             WITH personal_best AS (
                 SELECT *, ROW_NUMBER() OVER (
-                    PARTITION BY runner_name, language ORDER BY median_ms ASC, created_at ASC
+                    PARTITION BY username, runner_name, language
+                    ORDER BY median_ms ASC, created_at ASC
                 ) AS personal_rank
                 FROM scores
                 WHERE {where}
             )
-            SELECT job_id, runner_name, language, gpu_name, median_ms, min_ms,
+            SELECT job_id, username, runner_name, language, gpu_name, median_ms, min_ms,
                    p95_ms, source_hash, created_at
             FROM personal_best
             WHERE personal_rank = 1
@@ -312,9 +344,9 @@ class ScoreStore:
         with closing(self._connect()) as connection:
             row = connection.execute(
                 """
-                SELECT job_id, challenge_key, challenge_name, runner_name, language,
-                       gpu_name, median_ms, min_ms, p95_ms, source_hash, source_code,
-                       solution_filename, created_at
+                SELECT job_id, username, challenge_key, challenge_name, runner_name,
+                       language, gpu_name, median_ms, min_ms, p95_ms, source_hash,
+                       source_code, solution_filename, created_at
                 FROM scores WHERE job_id = ?
                 """,
                 (job_id,),
@@ -335,12 +367,13 @@ class ScoreStore:
                 connection.execute(
                     """
                     INSERT INTO submission_attempts (
-                        job_id, challenge_key, runner_name, language, status,
+                        job_id, username, challenge_key, runner_name, language, status,
                         result_status, created_at, finished_at
-                    ) VALUES (?, ?, ?, ?, 'queued', NULL, ?, NULL)
+                    ) VALUES (?, ?, ?, ?, ?, 'queued', NULL, ?, NULL)
                     """,
                     (
                         job["id"],
+                        job.get("username", ""),
                         job["challenge"],
                         job["runner_name"],
                         job["language"],
@@ -365,15 +398,21 @@ class ScoreStore:
                     (job.get("status", "error"), result_status, job.get("finished_at"), job["id"]),
                 )
 
-    def challenge_progress(self) -> Dict[str, Dict[str, Any]]:
+    def challenge_progress(
+        self, username: Optional[str] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        where = "WHERE username = ?" if username else ""
+        params = (username,) if username else ()
         with closing(self._connect()) as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT challenge_key, COUNT(*) AS submission_count,
                        MAX(CASE WHEN result_status = 'passed' THEN 1 ELSE 0 END) AS passed
                 FROM submission_attempts
+                {where}
                 GROUP BY challenge_key
-                """
+                """,
+                params,
             ).fetchall()
         return {
             row["challenge_key"]: {
@@ -424,6 +463,335 @@ class SettingsStore:
             return dict(self.values)
 
 
+def hash_password(password: str, salt: Optional[bytes] = None) -> str:
+    salt = salt or os.urandom(16)
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1)
+    return "scrypt$" + salt.hex() + "$" + digest.hex()
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        scheme, salt_hex, digest_hex = stored.split("$", 2)
+        if scheme != "scrypt":
+            return False
+        digest = hashlib.scrypt(
+            password.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=16384, r=8, p=1
+        )
+        return hmac.compare_digest(digest, bytes.fromhex(digest_hex))
+    except (ValueError, TypeError, OSError):
+        return False
+
+
+SESSION_COOKIE = "lg_session"
+SESSION_TTL_SECONDS = 14 * 24 * 3600
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{2,32}$")
+
+
+class MultiuserStore:
+    """Users, sessions, announcements, site settings, per-user solutions."""
+
+    def __init__(self, path: Path):
+        self.path = path.resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize()
+
+    def _connect(self):
+        connection = sqlite3.connect(self.path, timeout=30)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _initialize(self) -> None:
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        username TEXT PRIMARY KEY,
+                        password_hash TEXT NOT NULL,
+                        role TEXT NOT NULL DEFAULT 'user',
+                        disabled INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        token_hash TEXT PRIMARY KEY,
+                        username TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at)"
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS announcements (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        body TEXT NOT NULL,
+                        author TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS site_settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_solutions (
+                        username TEXT NOT NULL,
+                        challenge_key TEXT NOT NULL,
+                        language TEXT NOT NULL,
+                        source_code TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (username, challenge_key, language)
+                    )
+                    """
+                )
+
+    # ---- users ----
+
+    def user_count(self) -> int:
+        with closing(self._connect()) as connection:
+            return int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+    def create_user(
+        self, username: str, password: str, role: str = "user"
+    ) -> Dict[str, Any]:
+        if not USERNAME_PATTERN.match(username):
+            raise ValueError("用户名只能包含字母、数字、_ . -，长度 2-32")
+        if len(password) < 6:
+            raise ValueError("密码至少 6 位")
+        with closing(self._connect()) as connection:
+            with connection:
+                try:
+                    connection.execute(
+                        "INSERT INTO users (username, password_hash, role, created_at) "
+                        "VALUES (?, ?, ?, ?)",
+                        (username, hash_password(password), role, utc_now()),
+                    )
+                except sqlite3.IntegrityError:
+                    raise ValueError("用户名已被使用")
+        return {"username": username, "role": role}
+
+    def get_user(self, username: str) -> Optional[Dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT username, role, disabled, created_at FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def verify_login(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT username, password_hash, role, disabled FROM users "
+                "WHERE username = ?",
+                (username,),
+            ).fetchone()
+        if row is None or row["disabled"]:
+            return None
+        if not verify_password(password, row["password_hash"]):
+            return None
+        return {"username": row["username"], "role": row["role"]}
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT username, role, disabled, created_at FROM users ORDER BY created_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_disabled(self, username: str, disabled: bool) -> bool:
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "UPDATE users SET disabled = ? WHERE username = ?",
+                    (int(disabled), username),
+                )
+                if cursor.rowcount:
+                    connection.execute(
+                        "DELETE FROM sessions WHERE username = ?", (username,)
+                    )
+                return cursor.rowcount > 0
+
+    def delete_user(self, username: str) -> bool:
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "DELETE FROM users WHERE username = ?", (username,)
+                )
+                connection.execute(
+                    "DELETE FROM sessions WHERE username = ?", (username,)
+                )
+                connection.execute(
+                    "DELETE FROM user_solutions WHERE username = ?", (username,)
+                )
+                return cursor.rowcount > 0
+
+    def change_password(self, username: str, old: str, new: str) -> bool:
+        user = self.verify_login(username, old)
+        if user is None:
+            raise ValueError("原密码错误")
+        if len(new) < 6:
+            raise ValueError("新密码至少 6 位")
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    "UPDATE users SET password_hash = ? WHERE username = ?",
+                    (hash_password(new), username),
+                )
+        return True
+
+    # ---- sessions ----
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def create_session(self, username: str) -> str:
+        token = secrets.token_urlsafe(32)
+        expires = datetime.now(timezone.utc).timestamp() + SESSION_TTL_SECONDS
+        expires_iso = datetime.fromtimestamp(expires, timezone.utc).isoformat()
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    "DELETE FROM sessions WHERE expires_at < ?", (utc_now(),)
+                )
+                connection.execute(
+                    "INSERT INTO sessions (token_hash, username, created_at, expires_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (self._token_hash(token), username, utc_now(), expires_iso),
+                )
+        return token
+
+    def session_user(self, token: str) -> Optional[Dict[str, Any]]:
+        if not token:
+            return None
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT u.username, u.role, u.disabled FROM sessions s
+                JOIN users u ON u.username = s.username
+                WHERE s.token_hash = ? AND s.expires_at > ?
+                """,
+                (self._token_hash(token), utc_now()),
+            ).fetchone()
+        if row is None or row["disabled"]:
+            return None
+        return {"username": row["username"], "role": row["role"]}
+
+    def destroy_session(self, token: str) -> None:
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    "DELETE FROM sessions WHERE token_hash = ?",
+                    (self._token_hash(token),),
+                )
+
+    # ---- announcements ----
+
+    def announcements(self, limit: int = 20) -> List[Dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT id, title, body, author, created_at FROM announcements "
+                "ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_announcement(self, title: str, body: str, author: str) -> Dict[str, Any]:
+        title, body = title.strip(), body.strip()
+        if not title:
+            raise ValueError("公告标题不能为空")
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "INSERT INTO announcements (title, body, author, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (title[:120], body[:4000], author, utc_now()),
+                )
+        return {"id": cursor.lastrowid, "title": title, "body": body, "author": author}
+
+    def delete_announcement(self, announcement_id: int) -> bool:
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "DELETE FROM announcements WHERE id = ?", (announcement_id,)
+                )
+                return cursor.rowcount > 0
+
+    # ---- site settings ----
+
+    def site_setting(self, key: str, default: str = "") -> str:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT value FROM site_settings WHERE key = ?", (key,)
+            ).fetchone()
+        return row["value"] if row else default
+
+    def set_site_setting(self, key: str, value: str) -> None:
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    "INSERT INTO site_settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value),
+                )
+
+    # ---- user solutions ----
+
+    def save_solution(
+        self, username: str, challenge_key: str, language: str, source: str
+    ) -> None:
+        if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
+            raise ValueError("Source code exceeds 2 MiB")
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO user_solutions (
+                        username, challenge_key, language, source_code, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(username, challenge_key, language)
+                    DO UPDATE SET source_code = excluded.source_code,
+                                  updated_at = excluded.updated_at
+                    """,
+                    (username, challenge_key, language, source, utc_now()),
+                )
+
+    def get_solution(
+        self, username: str, challenge_key: str, language: str
+    ) -> Optional[str]:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT source_code FROM user_solutions "
+                "WHERE username = ? AND challenge_key = ? AND language = ?",
+                (username, challenge_key, language),
+            ).fetchone()
+        return row["source_code"] if row else None
+
+    def list_solutions(self, username: str) -> List[Dict[str, Any]]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT challenge_key, language, updated_at FROM user_solutions "
+                "WHERE username = ?",
+                (username,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def choose_directory(initial: str) -> Optional[str]:
     try:
         import tkinter as tk
@@ -470,6 +838,9 @@ class JobManager:
         catalog: ChallengeCatalog,
         scores: ScoreStore,
         ncu_launch_count: int,
+        sandbox: bool = False,
+        judge_image: str = "leetgpu-judge",
+        sandbox_timeout: int = 600,
     ):
         self.root = root.resolve()
         self.data_dir = data_dir.resolve()
@@ -477,6 +848,9 @@ class JobManager:
         self.catalog = catalog
         self.scores = scores
         self.ncu_launch_count = ncu_launch_count
+        self.sandbox = sandbox
+        self.judge_image = judge_image
+        self.sandbox_timeout = sandbox_timeout
         self.jobs: Dict[str, Dict[str, Any]] = {}
         self.lock = threading.RLock()
         self.pending: queue.Queue = queue.Queue()
@@ -492,6 +866,7 @@ class JobManager:
         runner_name: str,
         profile: bool,
         mode: str,
+        username: str = "",
     ) -> Dict[str, Any]:
         challenge_info = self.catalog.require(challenge)
         if language not in LANGUAGES:
@@ -516,10 +891,11 @@ class JobManager:
         pending_dir = self.data_dir / ".pending" / job_id
         job = {
             "id": job_id,
+            "username": username,
             "challenge": challenge,
             "language": language,
             "runner_name": runner_name,
-            "profile": profile,
+            "profile": profile and not self.sandbox,
             "mode": mode,
             "source_hash": hashlib.sha256(encoded).hexdigest(),
             "source_code": source,
@@ -621,23 +997,31 @@ class JobManager:
         shutil.copy2(pending_solution, solution)
         with self.lock:
             job["solution_path"] = str(solution)
-        command = [
-            sys.executable,
-            str(self.root / "scripts" / "local_runner.py"),
-            str(challenge["path"]),
-            "--language",
-            job["language"],
-            "--solution",
-            str(solution),
-            "--run-dir",
-            str(job_dir),
-            "--tests",
-            "correctness" if job["mode"] == "test" else "all",
-            "--profile",
-            "auto" if job["mode"] == "submit" and job["profile"] else "off",
-            "--ncu-launch-count",
-            str(self.ncu_launch_count),
-        ]
+        profile = "off" if self.sandbox else (
+            "auto" if job["mode"] == "submit" and job["profile"] else "off"
+        )
+        if self.sandbox:
+            command = self._sandbox_command(
+                challenge, solution, job["language"], job["mode"], profile
+            )
+        else:
+            command = [
+                sys.executable,
+                str(self.root / "scripts" / "local_runner.py"),
+                str(challenge["path"]),
+                "--language",
+                job["language"],
+                "--solution",
+                str(solution),
+                "--run-dir",
+                str(job_dir),
+                "--tests",
+                "correctness" if job["mode"] == "test" else "all",
+                "--profile",
+                profile,
+                "--ncu-launch-count",
+                str(self.ncu_launch_count),
+            ]
         (job_dir / "command.txt").write_text(
             subprocess.list2cmdline(command) + "\n", encoding="utf-8"
         )
@@ -656,12 +1040,23 @@ class JobManager:
         with self.lock:
             self.active_process = process
         web_log = job_dir / "web-execution.log"
+        timed_out = False
+        timer = None
+        if self.sandbox and self.sandbox_timeout > 0:
+            def _kill():
+                nonlocal timed_out
+                timed_out = True
+                process.kill()
+            timer = threading.Timer(self.sandbox_timeout, _kill)
+            timer.start()
         with web_log.open("w", encoding="utf-8", buffering=1) as output_file:
             assert process.stdout is not None
             for line in process.stdout:
                 output_file.write(line)
                 self._append_output(job_id, line)
         exit_code = process.wait()
+        if timer is not None:
+            timer.cancel()
         with self.lock:
             self.active_process = None
 
@@ -672,9 +1067,14 @@ class JobManager:
             result = json.loads(result_path.read_text(encoding="utf-8"))
             job["result_path"] = str(result_path)
         status = "completed" if result is not None else "error"
-        error = (
-            None if result is not None else f"Runner exited with {exit_code} without result.json"
-        )
+        if timed_out:
+            error = f"Sandbox killed the submission after {self.sandbox_timeout}s"
+        else:
+            error = (
+                None
+                if result is not None
+                else f"Runner exited with {exit_code} without result.json"
+            )
         with self.lock:
             job.update(
                 status=status,
@@ -693,6 +1093,59 @@ class JobManager:
         if process and process.poll() is None:
             process.terminate()
         self.pending.put(None)
+
+
+    def _sandbox_command(
+        self,
+        challenge: Mapping[str, Any],
+        solution: Path,
+        language: str,
+        mode: str,
+        profile: str,
+    ) -> List[str]:
+        challenges_dir = self.catalog.challenges_dir
+        challenge_rel = Path(challenge["path"]).relative_to(challenges_dir)
+        inner = [
+            "python3",
+            "/judge/repo/scripts/local_runner.py",
+            f"/judge/challenges/{challenge_rel.as_posix()}",
+            "--language",
+            language,
+            "--solution",
+            f"/work/{solution.name}",
+            "--run-dir",
+            "/work",
+            "--tests",
+            "correctness" if mode == "test" else "all",
+            "--profile",
+            profile,
+            "--ncu-launch-count",
+            str(self.ncu_launch_count),
+        ]
+        uid, gid = os.getuid(), os.getgid()
+        return [
+            "docker", "run", "--rm", "-i",
+            "--network", "none",
+            "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges",
+            "--read-only",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=2g",
+            "--pids-limit", "256",
+            "--memory", "8g",
+            "--cpus", "4",
+            "--gpus", "all",
+            "--user", f"{uid}:{gid}",
+            "--workdir", "/work",
+            "-e", "HOME=/tmp",
+            "-e", "PYTHONDONTWRITEBYTECODE=1",
+            "-e", "TRITON_CACHE_DIR=/tmp/.triton-cache",
+            "-e", "TORCHINDUCTOR_CACHE_DIR=/tmp/.inductor-cache",
+            "-v", f"{self.root}:/judge/repo:ro",
+            "-v", f"{challenges_dir}:/judge/challenges:ro",
+            "-v", f"{solution.parent}:/work",
+            self.judge_image,
+            *inner,
+        ]
 
 
 def system_info() -> Dict[str, Any]:
@@ -721,19 +1174,34 @@ class WebApplication:
         data_dir: Path,
         ncu_launch_count: int,
         challenges_dir: Path,
+        sandbox: bool = False,
+        judge_image: str = "leetgpu-judge",
+        sandbox_timeout: int = 600,
+        auth_required: bool = False,
     ):
         self.root = root.resolve()
         self.web_root = self.root / "web"
         self.catalog = ChallengeCatalog(challenges_dir)
         self.scores = ScoreStore(data_dir / "leaderboard.sqlite3")
         self.settings = SettingsStore(data_dir / "settings.json", self.root / "ncu_reports")
+        self.users = MultiuserStore(data_dir / "users.sqlite3")
+        self.sandbox = sandbox
+        self.auth_required = auth_required or sandbox
         self.jobs = JobManager(
-            self.root, data_dir, self.catalog, self.scores, ncu_launch_count=ncu_launch_count
+            self.root, data_dir, self.catalog, self.scores,
+            ncu_launch_count=ncu_launch_count,
+            sandbox=sandbox, judge_image=judge_image, sandbox_timeout=sandbox_timeout,
         )
         self.system = system_info()
 
-    def challenge_list(self) -> List[Dict[str, Any]]:
-        progress = self.scores.challenge_progress()
+    def registration_open(self) -> bool:
+        # Open by default until the first admin exists; then configurable.
+        if self.users.user_count() == 0:
+            return True
+        return self.users.site_setting("registration_open", "1") == "1"
+
+    def challenge_list(self, username: str = "") -> List[Dict[str, Any]]:
+        progress = self.scores.challenge_progress(username or None)
         challenges = self.catalog.list_public()
         for challenge in challenges:
             challenge.update(
@@ -827,12 +1295,73 @@ class RequestHandler(BaseHTTPRequestHandler):
             raise ValueError("Request JSON must be an object")
         return value
 
+    # ---- auth ----
+
+    def _session_token(self) -> str:
+        cookie = self.headers.get("Cookie", "")
+        for part in cookie.split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == SESSION_COOKIE:
+                return value
+        return ""
+
+    def current_user(self) -> Optional[Dict[str, Any]]:
+        return self.app.users.session_user(self._session_token())
+
+    def require_user(self) -> Dict[str, Any]:
+        if not self.app.auth_required:
+            return {"username": "", "role": "admin"}
+        user = self.current_user()
+        if user is None:
+            raise PermissionError("需要登录")
+        return user
+
+    def require_admin(self) -> Dict[str, Any]:
+        user = self.require_user()
+        if user["role"] != "admin":
+            raise PermissionError("需要管理员权限")
+        return user
+
+    def set_session_cookie(self, token: str, max_age: int = SESSION_TTL_SECONDS) -> None:
+        attrs = [f"{SESSION_COOKIE}={token}", "Path=/", "HttpOnly", "SameSite=Lax"]
+        if max_age <= 0:
+            attrs.append("Max-Age=0")
+        else:
+            attrs.append(f"Max-Age={max_age}")
+        if self.server.secure_cookies:
+            attrs.append("Secure")
+        self.send_header("Set-Cookie", "; ".join(attrs))
+
+    def send_json(self, value: Any, status: int = HTTPStatus.OK, cookie: Optional[str] = None) -> None:
+        body = json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")
+        self.send_response(status)
+        self._security_headers()
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        if cookie is not None:
+            self.set_session_cookie(cookie)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:
         parsed = urlsplit(self.path)
         query = parse_qs(parsed.query)
         try:
-            if parsed.path == "/api/challenges":
-                self.send_json({"challenges": self.app.challenge_list()})
+            if parsed.path == "/api/me":
+                user = self.current_user()
+                self.send_json({
+                    "user": user,
+                    "auth_required": self.app.auth_required,
+                    "registration_open": self.app.registration_open(),
+                })
+            elif parsed.path == "/api/announcements":
+                self.send_json({"announcements": self.app.users.announcements()})
+            elif parsed.path == "/api/challenges":
+                user = self.current_user() or {}
+                self.send_json(
+                    {"challenges": self.app.challenge_list(user.get("username", ""))}
+                )
             elif parsed.path == "/api/challenge":
                 self.send_json(self.app.catalog.detail(query.get("key", [""])[0]))
             elif parsed.path == "/api/system":
@@ -847,14 +1376,41 @@ class RequestHandler(BaseHTTPRequestHandler):
                     {"scores": self.app.scores.leaderboard(challenge, language=language)}
                 )
             elif parsed.path == "/api/leaderboard/source":
-                self.send_json(self.app.scores.submission(query.get("job", [""])[0]))
+                user = self.require_user()
+                submission = self.app.scores.submission(query.get("job", [""])[0])
+                if (
+                    user["role"] != "admin"
+                    and submission.get("username", "") != user["username"]
+                ):
+                    raise PermissionError("只能查看自己的源码")
+                self.send_json(submission)
             elif parsed.path == "/api/settings":
                 self.send_json(self.app.settings.public())
+            elif parsed.path == "/api/solutions":
+                user = self.require_user()
+                self.send_json(
+                    {"solutions": self.app.users.list_solutions(user["username"])}
+                )
+            elif parsed.path == "/api/solution":
+                user = self.require_user()
+                source = self.app.users.get_solution(
+                    user["username"],
+                    query.get("challenge", [""])[0],
+                    query.get("language", [""])[0],
+                )
+                self.send_json({"source": source})
+            elif parsed.path == "/api/admin/users":
+                self.require_admin()
+                self.send_json({"users": self.app.users.list_users()})
             elif parsed.path.startswith("/api/jobs/"):
+                user = self.require_user()
                 parts = parsed.path.strip("/").split("/")
                 job_id = parts[2] if len(parts) >= 3 else ""
+                job = self.app.jobs.public(job_id)
+                if user["role"] != "admin" and job.get("username", "") != user["username"]:
+                    raise PermissionError("只能查看自己的任务")
                 if len(parts) == 3:
-                    self.send_json(self.app.jobs.public(job_id))
+                    self.send_json(job)
                 elif len(parts) == 5 and parts[3] == "artifacts":
                     artifact = self.app.jobs.artifact(job_id, parts[4])
                     if artifact is None:
@@ -873,6 +1429,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.send_file(self.app.web_root / relative)
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Not found")
+        except PermissionError as exc:
+            status = (
+                HTTPStatus.UNAUTHORIZED
+                if self.current_user() is None
+                else HTTPStatus.FORBIDDEN
+            )
+            self.send_error_json(status, str(exc))
         except KeyError as exc:
             self.send_error_json(HTTPStatus.NOT_FOUND, str(exc))
         except ValueError as exc:
@@ -884,7 +1447,53 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlsplit(self.path)
         try:
-            if parsed.path == "/api/jobs":
+            if parsed.path == "/api/auth/register":
+                body = self.read_json()
+                username = str(body.get("username", "")).strip()
+                password = str(body.get("password", ""))
+                first_user = self.app.users.user_count() == 0
+                if not (first_user or self.app.registration_open()):
+                    raise PermissionError("注册已关闭，请联系管理员")
+                user = self.app.users.create_user(
+                    username, password, role="admin" if first_user else "user"
+                )
+                token = self.app.users.create_session(user["username"])
+                self.send_json(
+                    {"user": self.app.users.get_user(user["username"])},
+                    status=HTTPStatus.CREATED,
+                    cookie=token,
+                )
+            elif parsed.path == "/api/auth/login":
+                body = self.read_json()
+                user = self.app.users.verify_login(
+                    str(body.get("username", "")).strip(),
+                    str(body.get("password", "")),
+                )
+                if user is None:
+                    time.sleep(0.5)  # basic brute-force throttle
+                    raise PermissionError("用户名或密码错误")
+                token = self.app.users.create_session(user["username"])
+                self.send_json({"user": user}, cookie=token)
+            elif parsed.path == "/api/auth/logout":
+                token = self._session_token()
+                if token:
+                    self.app.users.destroy_session(token)
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self._security_headers()
+                self.set_session_cookie("", max_age=0)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            elif parsed.path == "/api/auth/change-password":
+                user = self.require_user()
+                body = self.read_json()
+                self.app.users.change_password(
+                    user["username"],
+                    str(body.get("old_password", "")),
+                    str(body.get("new_password", "")),
+                )
+                self.send_json({"changed": True})
+            elif parsed.path == "/api/jobs":
+                user = self.require_user()
                 body = self.read_json()
                 for field in ("challenge", "language", "source", "runner_name", "mode"):
                     if field in body and not isinstance(body[field], str):
@@ -896,8 +1505,43 @@ class RequestHandler(BaseHTTPRequestHandler):
                     runner_name=str(body.get("runner_name", "local")),
                     profile=bool(body.get("profile", True)),
                     mode=str(body.get("mode", "submit")),
+                    username=user["username"],
                 )
                 self.send_json(job, status=HTTPStatus.ACCEPTED)
+            elif parsed.path == "/api/solutions":
+                user = self.require_user()
+                body = self.read_json()
+                challenge = str(body.get("challenge", ""))
+                language = str(body.get("language", ""))
+                self.app.catalog.require(challenge)
+                if language not in LANGUAGES:
+                    raise ValueError(f"Unsupported language: {language}")
+                source = str(body.get("source", ""))
+                self.app.users.save_solution(
+                    user["username"], challenge, language, source
+                )
+                self.send_json({"saved": True})
+            elif parsed.path == "/api/admin/announcements":
+                user = self.require_admin()
+                body = self.read_json()
+                self.send_json(
+                    self.app.users.add_announcement(
+                        str(body.get("title", "")), str(body.get("body", "")),
+                        user["username"],
+                    ),
+                    status=HTTPStatus.CREATED,
+                )
+            elif parsed.path == "/api/admin/settings":
+                self.require_admin()
+                body = self.read_json()
+                if "registration_open" in body:
+                    self.app.users.set_site_setting(
+                        "registration_open",
+                        "1" if body["registration_open"] else "0",
+                    )
+                self.send_json(
+                    {"registration_open": self.app.registration_open()}
+                )
             elif parsed.path == "/api/settings":
                 body = self.read_json()
                 directory = body.get("ncu_export_dir")
@@ -912,9 +1556,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_json(self.app.settings.public())
             elif parsed.path.startswith("/api/jobs/"):
+                user = self.require_user()
                 parts = parsed.path.strip("/").split("/")
                 job_id = parts[2] if len(parts) >= 3 else ""
                 action = parts[3] if len(parts) == 4 else ""
+                job = self.app.jobs.public(job_id)
+                if user["role"] != "admin" and job.get("username", "") != user["username"]:
+                    raise PermissionError("只能操作自己的任务")
                 if action == "export-nsight":
                     destination = self.app.export_nsight(job_id)
                     self.send_json({"destination": str(destination)})
@@ -925,6 +1573,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown job action")
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown API path")
+        except PermissionError as exc:
+            status = (
+                HTTPStatus.UNAUTHORIZED
+                if self.current_user() is None
+                else HTTPStatus.FORBIDDEN
+            )
+            self.send_error_json(status, str(exc))
         except KeyError as exc:
             self.send_error_json(HTTPStatus.NOT_FOUND, str(exc))
         except FileNotFoundError as exc:
@@ -940,24 +1595,58 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             parts = parsed.path.strip("/").split("/")
             if len(parts) == 3 and parts[:2] == ["api", "leaderboard"]:
+                user = self.require_user()
+                entry = self.app.scores.submission(parts[2])
+                if user["role"] != "admin" and entry.get("username", "") != user["username"]:
+                    raise PermissionError("只能删除自己的成绩")
                 deleted = self.app.scores.delete(parts[2])
                 if not deleted:
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Leaderboard entry not found")
                 else:
                     self.send_json({"deleted": True})
+            elif len(parts) == 4 and parts[:3] == ["api", "admin", "announcements"]:
+                self.require_admin()
+                self.send_json(
+                    {"deleted": self.app.users.delete_announcement(int(parts[3]))}
+                )
+            elif len(parts) == 5 and parts[:3] == ["api", "admin", "users"]:
+                self.require_admin()
+                target, action = parts[3], parts[4]
+                if action == "disable":
+                    self.send_json(
+                        {"disabled": self.app.users.set_disabled(target, True)}
+                    )
+                elif action == "enable":
+                    self.send_json(
+                        {"enabled": self.app.users.set_disabled(target, False)}
+                    )
+                else:
+                    self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown user action")
+            elif len(parts) == 4 and parts[:3] == ["api", "admin", "users"]:
+                self.require_admin()
+                self.send_json({"deleted": self.app.users.delete_user(parts[3])})
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown API path")
+        except PermissionError as exc:
+            status = (
+                HTTPStatus.UNAUTHORIZED
+                if self.current_user() is None
+                else HTTPStatus.FORBIDDEN
+            )
+            self.send_error_json(status, str(exc))
+        except (KeyError, ValueError) as exc:
+            self.send_error_json(HTTPStatus.NOT_FOUND, str(exc))
         except Exception as exc:
             LOGGER.exception("DELETE %s failed", self.path)
             self.send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
-
 class ApplicationServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, handler, app):
+    def __init__(self, address, handler, app, secure_cookies: bool = False):
         super().__init__(address, handler)
         self.app = app
+        self.secure_cookies = secure_cookies
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -965,6 +1654,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--data-dir", type=Path, default=Path("local_data"))
+    parser.add_argument(
+        "--sandbox",
+        action="store_true",
+        help=(
+            "Run submissions inside a rootless Docker container "
+            "(--network none, --cap-drop ALL, --read-only, GPU via nvidia runtime). "
+            "Requires the leetgpu-judge image; see docker/."
+        ),
+    )
+    parser.add_argument(
+        "--judge-image",
+        default="leetgpu-judge",
+        help="Docker image used for sandboxed judging.",
+    )
+    parser.add_argument(
+        "--sandbox-timeout",
+        type=int,
+        default=600,
+        help="Seconds before a sandboxed submission is killed (0 disables).",
+    )
+    parser.add_argument(
+        "--auth",
+        action="store_true",
+        help="Require login even without --sandbox (multi-user mode).",
+    )
+    parser.add_argument(
+        "--secure-cookies",
+        action="store_true",
+        help="Mark session cookies Secure (use behind an HTTPS reverse proxy).",
+    )
     parser.add_argument(
         "--challenges-dir",
         type=Path,
@@ -1005,10 +1724,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             (root / args.data_dir).resolve(),
             args.ncu_launch_count,
             challenges_dir=challenges_dir,
+            sandbox=args.sandbox,
+            judge_image=args.judge_image,
+            sandbox_timeout=args.sandbox_timeout,
+            auth_required=args.auth,
         )
     except (FileNotFoundError, ValueError) as exc:
         parser.error(str(exc))
-    server = ApplicationServer((args.host, args.port), RequestHandler, app)
+    server = ApplicationServer(
+        (args.host, args.port), RequestHandler, app, secure_cookies=args.secure_cookies
+    )
     url = f"http://{args.host}:{args.port}"
     LOGGER.info("LeetGPU Local is running at %s", url)
     LOGGER.info("Challenges: %s", challenges_dir)
