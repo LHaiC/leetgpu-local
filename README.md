@@ -1,7 +1,7 @@
 # LeetGPU Local
 
-> **Fork 说明（LHaiC）**：本仓库在 [xicheng-han/leetgpu-local](https://github.com/xicheng-han/leetgpu-local)
-> 之上增加了多用户功能：
+> **Fork 说明（LHaiC）**：本仓库（`leetgpu-web`）在
+> [xicheng-han/leetgpu-local](https://github.com/xicheng-han/leetgpu-local) 之上增加了多用户功能：
 >
 > - **注册登录**：`--auth` 开启；首个注册用户自动成为管理员；公告、解法云端保存、每题排行榜按用户名区分。
 > - **公告**：管理员在「站点管理」里发布/删除，用户端顶部横幅显示。
