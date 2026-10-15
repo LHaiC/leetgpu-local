@@ -50,9 +50,6 @@
           <button class="icon-button hidden" id="admin-button" title="管理" aria-label="管理">
             <i data-lucide="shield"></i>
           </button>
-          <button class="icon-button" id="settings-button" title="设置" aria-label="设置">
-            <i data-lucide="settings"></i>
-          </button>
           <a class="icon-button" href="/api/challenges" target="_blank" title="API" aria-label="API">
             <i data-lucide="braces"></i>
           </a>
@@ -87,7 +84,7 @@
           </div>
           <nav class="challenge-list" id="challenge-list" aria-label="题目列表"></nav>
           <div class="sidebar-foot">
-            <span id="challenge-count">0 道题</span>
+            <span id="challenge-count"></span>
             <span data-i18n="sidebar.local_repo">本地题库</span>
           </div>
         </aside>
@@ -97,7 +94,7 @@
             <div class="challenge-identity">
               <div class="challenge-number" id="challenge-number">#</div>
               <div>
-                <h1 id="challenge-title">加载中</h1>
+                <h1 id="challenge-title"></h1>
                 <div class="challenge-meta">
                   <span class="difficulty-badge" id="difficulty-badge">--</span>
                   <span id="access-tier">free</span>
@@ -132,11 +129,11 @@
 
               <div class="view-content results-view" id="results-view">
                 <div class="result-summary" id="result-summary">
-                  <div class="empty-state"><i data-lucide="terminal"></i><span>暂无运行结果</span></div>
+                  <div class="empty-state"><i data-lucide="terminal"></i><span data-i18n="res.empty">暂无运行结果</span></div>
                 </div>
                 <div class="metrics-strip hidden" id="metrics-strip"></div>
                 <div class="compiler-panel hidden" id="compiler-panel">
-                  <div class="panel-label">编译器输出</div>
+                  <div class="panel-label" data-i18n="res.compiler_output">编译器输出</div>
                   <pre id="compiler-output"></pre>
                 </div>
                 <div class="test-results hidden" id="test-results"></div>
@@ -147,11 +144,11 @@
               <div class="view-content leaderboard-view" id="leaderboard-view">
                 <div class="leaderboard-toolbar">
                   <div>
-                    <span class="leaderboard-title">最佳成绩</span>
+                    <span class="leaderboard-title" data-i18n="lb.best">最佳成绩</span>
                     <span class="leaderboard-subtitle" id="leaderboard-subtitle"></span>
                   </div>
                   <select id="leaderboard-language" aria-label="排行榜语言">
-                    <option value="">全部语言</option>
+                    <option value="" data-i18n="lb.all_langs">全部语言</option>
                     <option value="cuda">CUDA</option>
                     <option value="triton">Triton</option>
                     <option value="pytorch">PyTorch</option>
@@ -166,7 +163,7 @@
                         <th data-i18n="lb.lang">语言</th>
                         <th data-i18n="lb.median">中位 (ms)</th>
                         <th data-i18n="lb.min">最短 (ms)</th>
-                        <th>提交时间</th>
+                        <th data-i18n="lb.submitted">提交时间</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -174,7 +171,7 @@
                   </table>
                 </div>
                 <div class="empty-state hidden" id="leaderboard-empty">
-                  <i data-lucide="chart-no-axes-column"></i><span>暂无有效成绩</span>
+                  <i data-lucide="chart-no-axes-column"></i><span data-i18n="lb.empty_entries">暂无有效成绩</span>
                 </div>
               </div>
             </section>
@@ -219,11 +216,6 @@
                   <i data-lucide="flask-conical"></i>
                   <span data-i18n="editor.test">测试</span>
                 </button>
-                <label class="profile-toggle">
-                  <input id="profile-enabled" type="checkbox" checked />
-                  <span class="toggle-track"><span></span></span>
-                  <span>Nsight</span>
-                </label>
                 <button class="run-button" id="run-button">
                   <i data-lucide="send"></i>
                   <span data-i18n="editor.submit">提交并计分</span>
@@ -239,7 +231,7 @@
     <dialog class="modal submission-modal" id="submission-modal">
       <div class="modal-head">
         <div>
-          <h2 id="submission-modal-title">提交代码</h2>
+          <h2 id="submission-modal-title" data-i18n="modal.submission_title">提交代码</h2>
           <span id="submission-modal-meta"></span>
         </div>
         <button class="icon-button" data-close-dialog="submission-modal" title="关闭" aria-label="关闭">
@@ -249,40 +241,14 @@
       <pre class="source-preview" id="submission-source"></pre>
       <div class="modal-actions">
         <button class="danger-button" id="delete-submission">
-          <i data-lucide="trash-2"></i><span>删除成绩</span>
+          <i data-lucide="trash-2"></i><span data-i18n="lb.delete_title">删除成绩</span>
         </button>
         <button class="secondary-button" id="copy-submission">
-          <i data-lucide="copy"></i><span>复制代码</span>
+          <i data-lucide="copy"></i><span data-i18n="editor.copy_code">复制代码</span>
         </button>
       </div>
     </dialog>
 
-    <dialog class="modal settings-modal" id="settings-modal">
-      <div class="modal-head">
-        <div>
-          <h2>本地设置</h2>
-          <span>Nsight Compute</span>
-        </div>
-        <button class="icon-button" data-close-dialog="settings-modal" title="关闭" aria-label="关闭">
-          <i data-lucide="x"></i>
-        </button>
-      </div>
-      <div class="settings-body">
-        <label for="ncu-export-dir">NCU 报告保存目录</label>
-
-        <div class="path-field">
-          <input id="ncu-export-dir" autocomplete="off" />
-          <button class="icon-button" id="pick-ncu-directory" title="选择目录" aria-label="选择目录">
-            <i data-lucide="folder-open"></i>
-          </button>
-        </div>
-      </div>
-      <div class="modal-actions">
-        <button class="primary-button" id="save-settings">
-          <i data-lucide="save"></i><span>保存设置</span>
-        </button>
-      </div>
-    </dialog>
     <dialog class="modal auth-modal" id="auth-modal">
       <div class="modal-head">
         <h2 id="auth-modal-title">登录</h2>
@@ -293,7 +259,7 @@
       <form class="auth-form" id="auth-form" method="dialog">
         <label>
           <span data-i18n="auth.username">用户名</span>
-          <input id="auth-username" autocomplete="username" required minlength="2" maxlength="32" />
+          <input id="auth-username" autocomplete="username" required minlength="2" maxlength="32" autofocus />
         </label>
         <label>
           <span data-i18n="auth.password">密码</span>
@@ -342,11 +308,13 @@
                 <option value="closed" data-i18n="admin.reg_closed">关闭注册</option>
               </select>
             </label>
-            <label class="profile-toggle">
-              <input id="maintenance-toggle" type="checkbox" />
-              <span class="toggle-track"><span></span></span>
+            <div class="admin-field">
               <span data-i18n="admin.maintenance">维护模式（暂停提交）</span>
-            </label>
+              <label class="profile-toggle">
+                <input id="maintenance-toggle" type="checkbox" />
+                <span class="toggle-track"><span></span></span>
+              </label>
+            </div>
           </div>
           <form class="admin-add-user" id="add-user-form">
             <input id="add-username" data-i18n-placeholder="auth.username" placeholder="用户名" maxlength="32" required />
@@ -360,7 +328,7 @@
           <div id="admin-users-list"></div>
         </div>
         <div class="admin-pane" id="admin-pending">
-          <div id="admin-pending-list"><div class="empty-state">暂无待审核用户</div></div>
+          <div id="admin-pending-list"><div class="empty-state" data-i18n="admin.pending_empty">暂无待审核用户</div></div>
         </div>
       </div>
     </dialog>

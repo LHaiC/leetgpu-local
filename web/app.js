@@ -20,10 +20,7 @@ const elements = {
   leaderboardSubtitle: document.querySelector("#leaderboard-subtitle"),
   lineNumbers: document.querySelector("#line-numbers"),
   metricsStrip: document.querySelector("#metrics-strip"),
-  ncuExportDir: document.querySelector("#ncu-export-dir"),
-  pickNcuDirectory: document.querySelector("#pick-ncu-directory"),
   problemBody: document.querySelector("#problem-body"),
-  profileEnabled: document.querySelector("#profile-enabled"),
   queueState: document.querySelector("#queue-state"),
   redoCode: document.querySelector("#redo-code"),
   resetCode: document.querySelector("#reset-code"),
@@ -33,9 +30,6 @@ const elements = {
   runnerName: document.querySelector("#runner-name"),
   sidebar: document.querySelector("#sidebar"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
-  saveSettings: document.querySelector("#save-settings"),
-  settingsButton: document.querySelector("#settings-button"),
-  settingsModal: document.querySelector("#settings-modal"),
   solutionFilename: document.querySelector("#solution-filename"),
   systemStatus: document.querySelector("#system-status"),
   submissionModal: document.querySelector("#submission-modal"),
@@ -104,7 +98,6 @@ const state = {
   activeJob: null,
   pollTimer: null,
   saveTimer: null,
-  settings: null,
   selectedSubmission: null,
   editorHistory: {
     entries: [],
@@ -473,7 +466,7 @@ function renderChallengeList() {
           <span class="challenge-item-number">${challenge.id}</span>
           <span class="challenge-item-main">
             <span class="challenge-item-title">${escapeHtml(challenge.title)}</span>
-            <span class="challenge-item-sub">${challenge.submission_count || 0} 次提交</span>
+            <span class="challenge-item-sub">${I18N.t("sidebar.submissions", { n: challenge.submission_count || 0 })}</span>
           </span>
           <span class="challenge-item-status">
             ${challenge.passed ? '<i data-lucide="circle-check"></i>' : `<span class="challenge-item-dot ${challenge.difficulty}"></span>`}
@@ -481,7 +474,7 @@ function renderChallengeList() {
         </button>`,
     )
     .join("");
-  elements.challengeCount.textContent = `${filtered.length} 道题`;
+  elements.challengeCount.textContent = I18N.t("sidebar.count", { n: filtered.length });
   elements.challengeList.querySelectorAll(".challenge-item").forEach((button) => {
     button.addEventListener("click", () => selectChallenge(button.dataset.key));
   });
@@ -491,23 +484,16 @@ function renderChallengeList() {
 async function selectChallenge(key) {
   if (!key) return;
   if (key === state.currentKey) {
-    if (window.innerWidth <= 820) elements.sidebar.classList.remove("open");
+    applyDetail();
     return;
   }
   state.currentKey = key;
   localStorage.setItem("leetgpu.challenge", key);
   renderChallengeList();
-  elements.problemBody.innerHTML = '<div class="empty-state">加载中</div>';
+  elements.problemBody.innerHTML = `<div class="empty-state">${I18N.t("misc.loading")}</div>`;
   try {
     state.detail = await api(`/api/challenge?key=${encodeURIComponent(key)}`);
-    const detail = state.detail;
-    elements.challengeNumber.textContent = `#${detail.id}`;
-    elements.challengeTitle.textContent = detail.title;
-    elements.difficultyBadge.textContent = detail.difficulty;
-    elements.difficultyBadge.className = `difficulty-badge ${detail.difficulty}`;
-    document.querySelector("#access-tier").textContent = detail.access_tier;
-    elements.problemBody.innerHTML = detail.problem_html;
-    elements.leaderboardSubtitle.textContent = detail.title;
+    applyDetail();
     setLanguage(state.language);
     renderChallengeList();
     loadLeaderboard();
@@ -519,6 +505,18 @@ async function selectChallenge(key) {
   } catch (error) {
     toast(error.message, "error");
   }
+}
+
+function applyDetail() {
+  const detail = state.detail;
+  if (!detail) return;
+  elements.challengeNumber.textContent = `#${detail.id}`;
+  elements.challengeTitle.textContent = detail.title;
+  elements.difficultyBadge.textContent = detail.difficulty;
+  elements.difficultyBadge.className = `difficulty-badge ${detail.difficulty}`;
+  document.querySelector("#access-tier").textContent = detail.access_tier;
+  elements.problemBody.innerHTML = detail.problem_html;
+  elements.leaderboardSubtitle.textContent = detail.title;
 }
 
 function setLanguage(language) {
@@ -551,16 +549,18 @@ function stateIcon(kind) {
 
 function renderRunning(job) {
   const queued = job.status === "queued";
-  const label = queued ? `队列第 ${job.queue_position || 1} 位` : "GPU 正在执行";
-  const actionLabel = job.mode === "test" ? "测试" : "提交";
+  const label = queued
+    ? I18N.t("job.queue_pos", { n: job.queue_position || 1 })
+    : I18N.t("job.executing");
+  const modeWord = I18N.t(job.mode === "test" ? "job.mode.test" : "job.mode.submit");
   elements.resultSummary.innerHTML = `
     <div class="result-state running">
       <div class="result-state-icon"><i data-lucide="${stateIcon("running")}"></i></div>
-      <div><strong>${queued ? `等待${actionLabel}` : `${actionLabel}中`}</strong><span>${label}</span></div>
+      <div><strong>${escapeHtml(I18N.t(queued ? "job.waiting" : "job.running", { mode: modeWord }))}</strong><span>${escapeHtml(label)}</span></div>
     </div>`;
   elements.executionOutput.textContent = job.output || "";
   elements.executionOutput.scrollTop = elements.executionOutput.scrollHeight;
-  elements.queueState.textContent = queued ? label : `${actionLabel}中`;
+  elements.queueState.textContent = queued ? label : I18N.t("job.running", { mode: modeWord });
   elements.resultIndicator.classList.add("visible");
   refreshIcons();
 }
@@ -611,17 +611,11 @@ function renderCompleted(job) {
   const displayStatus = result?.status || job.status;
   const isTest = job.mode === "test";
   const detail = passed
-    ? isTest
-      ? "完整正确性数据集已通过，不计入排行榜"
-      : "完整提交已通过，成绩已写入排行榜"
-    : result?.error || job.error || "查看执行日志";
+    ? I18N.t(isTest ? "res.pass_detail_test" : "res.pass_detail_submit")
+    : result?.error || job.error || I18N.t("res.view_log");
   const statusLabel = passed
-    ? isTest
-      ? "测试通过"
-      : "提交通过"
-    : isTest
-      ? "测试未通过"
-      : "提交未通过";
+    ? I18N.t(isTest ? "res.test_passed" : "res.submit_passed")
+    : I18N.t(isTest ? "res.test_failed" : "res.submit_failed");
   elements.resultSummary.innerHTML = `
     <div class="result-state ${passed ? "passed" : "failed"}">
       <div class="result-state-icon"><i data-lucide="${stateIcon(displayStatus)}"></i></div>
@@ -631,8 +625,8 @@ function renderCompleted(job) {
   if (result?.benchmark) {
     const gpu = result.benchmark.gpu_ms;
     elements.metricsStrip.innerHTML = `
-      <div class="metric"><span class="metric-label">中位耗时</span><span class="metric-value">${formatMs(gpu.median)}</span></div>
-      <div class="metric"><span class="metric-label">最佳耗时</span><span class="metric-value">${formatMs(gpu.min)}</span></div>
+      <div class="metric"><span class="metric-label">${I18N.t("res.median")}</span><span class="metric-value">${formatMs(gpu.median)}</span></div>
+      <div class="metric"><span class="metric-label">${I18N.t("res.best")}</span><span class="metric-value">${formatMs(gpu.min)}</span></div>
       <div class="metric"><span class="metric-label">P95</span><span class="metric-value">${formatMs(gpu.p95)}</span></div>`;
     elements.metricsStrip.classList.remove("hidden");
   } else {
@@ -680,32 +674,18 @@ function renderCompleted(job) {
 
   const artifactBase = `/api/jobs/${job.id}/artifacts`;
   const links = [
-    ["execution", "执行日志", "file-down"],
-    ["result", "JSON 结果", "braces"],
+    ["execution", I18N.t("res.execution_log"), "file-down"],
+    ["result", I18N.t("res.json_result"), "braces"],
   ];
-  if (result?.nsight_compute?.status === "passed") {
-    links.push(["nsight", "NCU 报告", "bar-chart-3"], ["nsight-csv", "NCU CSV", "table"]);
-  }
-  const downloads = links
+  elements.artifactBar.innerHTML = links
     .map(
       ([kind, label, icon]) =>
         `<a class="artifact-link" href="${artifactBase}/${kind}"><i data-lucide="${icon}"></i>${label}</a>`,
     )
     .join("");
-  const ncuActions = result?.nsight_compute?.status === "passed"
-    ? `<button class="artifact-button" data-ncu-action="open"><i data-lucide="external-link"></i>打开 NCU</button>
-       <button class="artifact-button" data-ncu-action="save"><i data-lucide="save"></i>保存 NCU</button>`
-    : "";
-  elements.artifactBar.innerHTML = downloads + ncuActions;
-  elements.artifactBar.querySelector('[data-ncu-action="open"]')?.addEventListener("click", () =>
-    openNsight(job.id),
-  );
-  elements.artifactBar.querySelector('[data-ncu-action="save"]')?.addEventListener("click", () =>
-    saveNsight(job.id),
-  );
   elements.artifactBar.classList.remove("hidden");
   elements.executionOutput.textContent = job.output || "";
-  elements.queueState.textContent = "空闲";
+  elements.queueState.textContent = I18N.t("nav.idle");
   elements.runButton.disabled = false;
   elements.testButton.disabled = false;
   elements.resultIndicator.classList.remove("visible");
@@ -728,7 +708,7 @@ async function pollJob(jobId) {
   } catch (error) {
     elements.runButton.disabled = false;
     elements.testButton.disabled = false;
-    elements.queueState.textContent = "错误";
+    elements.queueState.textContent = I18N.t("nav.error");
     toast(error.message, "error");
   }
 }
@@ -752,7 +732,6 @@ async function submitRun(mode) {
         language: state.language,
         source: elements.codeEditor.value,
         runner_name: elements.runnerName.value,
-        profile: elements.profileEnabled.checked,
         mode,
       }),
     });
@@ -789,34 +768,13 @@ async function openSubmission(jobId) {
 }
 
 async function deleteSubmission(jobId) {
-  if (!window.confirm("删除这条排行榜成绩？")) return;
+  if (!window.confirm(I18N.t("lb.confirm_delete"))) return;
   try {
     await api(`/api/leaderboard/${encodeURIComponent(jobId)}`, { method: "DELETE" });
     if (elements.submissionModal.open) elements.submissionModal.close();
     state.selectedSubmission = null;
     await loadLeaderboard();
-    toast("排行榜成绩已删除");
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
-async function openNsight(jobId) {
-  try {
-    await api(`/api/jobs/${jobId}/open-nsight`, { method: "POST", body: "{}" });
-    toast("已打开 Nsight Compute");
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
-async function saveNsight(jobId) {
-  try {
-    const result = await api(`/api/jobs/${jobId}/export-nsight`, {
-      method: "POST",
-      body: "{}",
-    });
-    toast(`已保存到 ${result.destination}`);
+    toast(I18N.t("lb.deleted"));
   } catch (error) {
     toast(error.message, "error");
   }
@@ -841,7 +799,7 @@ async function loadLeaderboard() {
             <td>${formatMs(score.min_ms)}</td>
             <td>${new Date(score.created_at).toLocaleString()}</td>
             <td class="leaderboard-actions">
-              <button class="icon-button" data-delete-job="${score.job_id}" title="删除成绩" aria-label="删除成绩">
+              <button class="icon-button" data-delete-job="${score.job_id}" title="${I18N.t("lb.delete_title")}" aria-label="${I18N.t("lb.delete_title")}">
                 <i data-lucide="trash-2"></i>
               </button>
             </td>
@@ -893,7 +851,7 @@ async function loadAdminAnnouncements() {
         (a) => `
         <div class="admin-row">
           <span class="admin-row-main">${escapeHtml(a.title)}</span>
-          <button class="icon-button" data-del-ann="${a.id}" title="删除">
+          <button class="icon-button" data-del-ann="${a.id}" title="${I18N.t("admin.delete_title")}">
             <i data-lucide="trash-2"></i>
           </button>
         </div>`,
@@ -923,10 +881,10 @@ async function loadAdminUsers() {
         <div class="admin-row">
           <span class="admin-row-main">
             ${escapeHtml(u.username)}
-            <span class="admin-role">${u.role}${u.disabled ? " · 已禁用" : ""}</span>
+            <span class="admin-role">${escapeHtml(u.role)}${u.disabled ? I18N.t("admin.disabled_suffix") : ""}</span>
           </span>
           <button class="icon-button" data-toggle-user="${escapeHtml(u.username)}" data-disabled="${u.disabled ? 1 : 0}"
-                  title="${u.disabled ? "启用" : "禁用"}">
+                  title="${u.disabled ? I18N.t("admin.enable") : I18N.t("admin.disable")}">
             <i data-lucide="${u.disabled ? "user-check" : "user-x"}"></i>
           </button>
         </div>`,
@@ -1019,39 +977,8 @@ async function pollGpu() {
 
 setInterval(pollGpu, 5000);
 
-async function saveSettings() {
-  try {
-    const settings = await api("/api/settings", {
-      method: "POST",
-      body: JSON.stringify({ ncu_export_dir: elements.ncuExportDir.value }),
-    });
-    state.settings = settings;
-    elements.ncuExportDir.value = settings.ncu_export_dir;
-    elements.settingsModal.close();
-    toast("设置已保存");
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
 // Run once on load too.
 pollGpu();
-
-async function pickNcuDirectory() {
-  elements.pickNcuDirectory.disabled = true;
-  try {
-    const settings = await api("/api/settings/pick-directory", {
-      method: "POST",
-      body: "{}",
-    });
-    state.settings = settings;
-    elements.ncuExportDir.value = settings.ncu_export_dir;
-  } catch (error) {
-    toast(error.message, "error");
-  } finally {
-    elements.pickNcuDirectory.disabled = false;
-  }
-}
 
 async function initialize() {
   refreshIcons();
@@ -1063,21 +990,18 @@ async function initialize() {
   }
   loadAnnouncements();
   try {
-    const [challengeData, system, settings] = await Promise.all([
+    const [challengeData, system] = await Promise.all([
       api("/api/challenges"),
       api("/api/system"),
-      api("/api/settings"),
     ]);
     state.system = system;
-    state.settings = settings;
-    elements.ncuExportDir.value = settings.ncu_export_dir;
     state.challenges = challengeData.challenges;
     if (system.available) {
       elements.systemStatus.classList.add("ready");
       elements.systemStatus.querySelector(".system-name").textContent =
         `${system.gpu} · ${Math.round(system.memory_mb / 1024)} GB`;
     } else {
-      elements.systemStatus.querySelector(".system-name").textContent = "GPU 不可用";
+      elements.systemStatus.querySelector(".system-name").textContent = I18N.t("sys.gpu_unavailable");
     }
     renderChallengeList();
     const saved = localStorage.getItem("leetgpu.challenge");
@@ -1145,7 +1069,7 @@ elements.codeEditor.addEventListener("keydown", (event) => {
 elements.undoCode.addEventListener("click", undoEditor);
 elements.redoCode.addEventListener("click", redoEditor);
 elements.resetCode.addEventListener("click", () => {
-  if (!window.confirm("恢复当前语言的 Starter？")) return;
+  if (!window.confirm(I18N.t("editor.confirm_reset"))) return;
   localStorage.removeItem(draftKey());
   loadCode();
 });
@@ -1153,22 +1077,15 @@ elements.testButton.addEventListener("click", () => submitRun("test"));
 elements.runButton.addEventListener("click", () => submitRun("submit"));
 elements.leaderboardLanguage.addEventListener("change", loadLeaderboard);
 elements.sidebarToggle.addEventListener("click", () => elements.sidebar.classList.toggle("open"));
-elements.settingsButton.addEventListener("click", () => {
-  elements.ncuExportDir.value = state.settings?.ncu_export_dir || "";
-  elements.settingsModal.showModal();
-  refreshIcons();
-});
-elements.saveSettings.addEventListener("click", saveSettings);
-elements.pickNcuDirectory.addEventListener("click", pickNcuDirectory);
 elements.deleteSubmission.addEventListener("click", () => {
   if (state.selectedSubmission) deleteSubmission(state.selectedSubmission.job_id);
 });
 elements.copySubmission.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(elements.submissionSource.textContent);
-    toast("代码已复制");
+    toast(I18N.t("editor.copied"));
   } catch {
-    toast("无法访问剪贴板", "error");
+    toast(I18N.t("editor.copy_failed"), "error");
   }
 });
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
@@ -1248,14 +1165,24 @@ elements.addUserForm.addEventListener("submit", async (event) => {
     elements.addUsername.value = "";
     elements.addPassword.value = "";
     await loadAdminUsers();
-    toast("User added");
+    toast(I18N.t("admin.add_user") + " ✓");
   } catch (error) {
     toast(error.message, "error");
   }
 });
 elements.langToggle.addEventListener("click", () => {
-  const next = window.I18N.toggle();
-  toast(next === "zh" ? "已切换到中文" : "Switched to English");
+  window.I18N.toggle();
+  toast(I18N.t("misc.lang_switched"));
+  // Re-render JS-generated content so it picks up the new locale.
+  renderChallengeList();
+  if (state.currentKey) selectChallenge(state.currentKey);
+  if (state.activeJob) {
+    if (state.activeJob.status === "completed" || state.activeJob.status === "error") {
+      renderCompleted(state.activeJob);
+    } else {
+      renderRunning(state.activeJob);
+    }
+  }
 });
 document.querySelectorAll("[data-admin-tab]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1271,7 +1198,7 @@ elements.vimToggle.addEventListener("click", () => {
   const on = window.LeetGPUVim && window.LeetGPUVim.toggle();
   elements.vimToggle.classList.toggle("active", !!on);
   elements.vimMode.classList.toggle("on", !!on);
-  toast(on ? "Vim 模式已开启" : "Vim 模式已关闭");
+  toast(on ? I18N.t("vim.on") : I18N.t("vim.off"));
 });
 if (window.LeetGPUVim && window.LeetGPUVim.enabled) {
   elements.vimToggle.classList.add("active");

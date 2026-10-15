@@ -31,8 +31,7 @@
 ## 中文
 
 LeetGPU Local 把官方题库变成一个可以完全在本机使用的 GPU 编程练习环境。连接官方题库后，
-你可以直接浏览题目、编写 CUDA、Triton 或 PyTorch 解法，运行完整测试，比较性能，并保存
-Nsight Compute 报告。
+你可以直接浏览题目、编写 CUDA、Triton 或 PyTorch 解法，运行完整测试，并比较性能。
 
 ### 可以做什么
 
@@ -63,11 +62,6 @@ Nsight Compute 报告。
 排行榜保存历史最佳成绩。删除当前最佳成绩后，同名解法的下一条成绩会自动递补。
 排行榜只适合比较同一台机器上的结果，不同 GPU 的耗时不能直接比较。
 
-#### 使用 Nsight Compute
-
-提交时可以打开 Nsight 开关。完成后可以保存 `.ncu-rep` 报告，或直接使用本机
-Nsight Compute 打开报告继续分析。
-
 ### 安装
 
 目前提供 Windows 10/11 的自动安装流程。需要：
@@ -76,7 +70,6 @@ Nsight Compute 打开报告继续分析。
 - Conda 或 Miniconda；
 - CUDA Toolkit；
 - Visual Studio 2022 Build Tools，并安装 **Desktop development with C++**；
-- 可选的 Nsight Compute。
 
 #### 1. 获取本项目
 
@@ -156,13 +149,10 @@ python .\scripts\local_runner.py $Challenge --language pytorch
 
 ```powershell
 # 只检查正确性
-python .\scripts\local_runner.py $Challenge --language cuda --tests correctness --profile off
+python .\scripts\local_runner.py $Challenge --language cuda --tests correctness
 
-# 完整评测，不运行 Nsight Compute
-python .\scripts\local_runner.py $Challenge --language triton --profile off
-
-# 完整评测，并要求 Nsight Compute 成功
-python .\scripts\local_runner.py $Challenge --language cuda --profile on
+# 完整评测（正确性 + 性能）
+python .\scripts\local_runner.py $Challenge --language triton
 
 # 评测任意位置的解法文件
 python .\scripts\local_runner.py $Challenge --language cuda --solution D:\work\solution.cu
@@ -189,7 +179,7 @@ python .\scripts\local_runner.py $Challenge --language cuda --solution D:\work\s
 
 LeetGPU Local turns the official challenge repository into a GPU programming environment that runs
 on your own machine. Once connected to an upstream checkout, it lets you browse challenges, write
-CUDA, Triton, or PyTorch solutions, run the full test set, compare performance, and save Nsight
+CUDA, Triton, or PyTorch solutions, run the full test set, and compare performance.
 Compute reports.
 
 ### What You Can Do
@@ -224,11 +214,6 @@ The leaderboard keeps the historical best result for each name and language. Rem
 best promotes the next result. Scores are intended for comparisons on the same machine; timings
 from different GPUs are not directly comparable.
 
-#### Profile with Nsight Compute
-
-Enable the Nsight option when submitting. After the run, save the `.ncu-rep` file or open it
-directly in the local Nsight Compute application.
-
 ### Installation
 
 The automated setup currently targets Windows 10/11. You need:
@@ -237,7 +222,6 @@ The automated setup currently targets Windows 10/11. You need:
 - Conda or Miniconda;
 - CUDA Toolkit;
 - Visual Studio 2022 Build Tools with **Desktop development with C++**;
-- optional Nsight Compute.
 
 #### 1. Get This Project
 
@@ -319,13 +303,10 @@ Common options:
 
 ```powershell
 # Correctness only
-python .\scripts\local_runner.py $Challenge --language cuda --tests correctness --profile off
+python .\scripts\local_runner.py $Challenge --language cuda --tests correctness
 
-# Full evaluation without Nsight Compute
-python .\scripts\local_runner.py $Challenge --language triton --profile off
-
-# Full evaluation with required Nsight Compute profiling
-python .\scripts\local_runner.py $Challenge --language cuda --profile on
+# Full evaluation (correctness + performance)
+python .\scripts\local_runner.py $Challenge --language triton
 
 # Evaluate a solution stored elsewhere
 python .\scripts\local_runner.py $Challenge --language cuda --solution D:\work\solution.cu

@@ -78,8 +78,6 @@ htmlcov/
 logs/
 .local_build/
 local_data/
-ncu_reports/
-*.ncu-rep
 
 # User-managed upstream checkout
 upstream/

@@ -8,8 +8,8 @@
 浏览器 → nginx (TLS) → local_web.py (--sandbox --auth) → docker run leetgpu-judge (无网/无特权)
 ```
 
-判题容器：`--network none`、drop 所有 capability、`--read-only`、非 root（宿主 uid）、
-限制 8G 内存 / 4 CPU / 256 pid，超时 600s 可配。Nsight 在沙箱模式下禁用。
+判题容器：`--network none`、drop 所有 capability、`--read-only`、非 root（容器内 nobody）、
+限制 8G 内存 / 4 CPU / 256 pid，超时 600s 可配。
 
 ## 步骤
 

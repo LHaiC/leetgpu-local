@@ -19,7 +19,6 @@ class LocalWebApiTest(unittest.TestCase):
         cls.app = WebApplication(
             root,
             Path(cls.temporary.name) / "data",
-            ncu_launch_count=1,
             challenges_dir=challenges_dir,
         )
         cls.server = ApplicationServer(("127.0.0.1", 0), RequestHandler, cls.app)
@@ -63,22 +62,6 @@ class LocalWebApiTest(unittest.TestCase):
             urlopen(request, timeout=5)
 
         self.assertEqual(context.exception.code, 400)
-
-    def test_settings_round_trip(self):
-        export_dir = Path(self.temporary.name) / "reports"
-        body = json.dumps({"ncu_export_dir": str(export_dir)}).encode("utf-8")
-        request = Request(
-            f"{self.base_url}/api/settings",
-            data=body,
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-
-        with urlopen(request, timeout=5) as response:
-            settings = json.load(response)
-
-        self.assertEqual(Path(settings["ncu_export_dir"]), export_dir)
-        self.assertTrue(export_dir.is_dir())
 
     def get_json(self, path):
         with urlopen(f"{self.base_url}{path}", timeout=5) as response:

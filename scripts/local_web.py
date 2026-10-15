@@ -428,44 +428,6 @@ class ScoreStore:
         }
 
 
-class SettingsStore:
-    def __init__(self, path: Path, default_ncu_dir: Path):
-        self.path = path.resolve()
-        self.default_ncu_dir = default_ncu_dir.resolve()
-        self.lock = threading.RLock()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.values = self._load()
-
-    def _load(self) -> Dict[str, Any]:
-        if self.path.is_file():
-            try:
-                value = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(value, dict):
-                    return value
-            except (OSError, json.JSONDecodeError):
-                LOGGER.warning("Ignoring invalid settings file: %s", self.path)
-        return {"ncu_export_dir": str(self.default_ncu_dir)}
-
-    def public(self) -> Dict[str, Any]:
-        with self.lock:
-            return dict(self.values)
-
-    def set_ncu_export_dir(self, value: str) -> Dict[str, Any]:
-        if not value.strip():
-            raise ValueError("NCU export directory cannot be empty")
-        expanded = os.path.expandvars(value.strip())
-        directory = Path(expanded).expanduser().resolve()
-        if directory.exists() and not directory.is_dir():
-            raise ValueError(f"NCU export path is not a directory: {directory}")
-        directory.mkdir(parents=True, exist_ok=True)
-        with self.lock:
-            self.values["ncu_export_dir"] = str(directory)
-            temporary = self.path.with_suffix(".tmp")
-            temporary.write_text(
-                json.dumps(self.values, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
-            temporary.replace(self.path)
-            return dict(self.values)
 
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:
@@ -856,44 +818,6 @@ class MultiuserStore:
         return [dict(row) for row in rows]
 
 
-def choose_directory(initial: str) -> Optional[str]:
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except ImportError as exc:
-        raise RuntimeError("Tk directory picker is unavailable") from exc
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    try:
-        selected = filedialog.askdirectory(initialdir=initial, mustexist=False, parent=root)
-    finally:
-        root.destroy()
-    return selected or None
-
-
-def find_ncu_ui() -> Optional[Path]:
-    configured = os.getenv("NCU_UI_PATH")
-    if configured and Path(configured).is_file():
-        return Path(configured).resolve()
-    found = shutil.which("ncu-ui") or shutil.which("ncu-ui.exe")
-    if found:
-        path = Path(found).resolve()
-        if path.suffix.lower() == ".bat":
-            executable = path.parent / "host" / "windows-desktop-win7-x64" / "ncu-ui.exe"
-            if executable.is_file():
-                return executable
-        return path
-    if os.name == "nt":
-        root = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "NVIDIA Corporation"
-        matches = sorted(root.glob("Nsight Compute */host/windows-desktop-win7-x64/ncu-ui.exe"))
-        if not matches:
-            matches = sorted(root.glob("Nsight Compute */ncu-ui.exe"))
-        if matches:
-            return matches[-1]
-    return None
-
-
 class JobManager:
     def __init__(
         self,
@@ -901,7 +825,6 @@ class JobManager:
         data_dir: Path,
         catalog: ChallengeCatalog,
         scores: ScoreStore,
-        ncu_launch_count: int,
         sandbox: bool = False,
         judge_image: str = "leetgpu-judge",
         sandbox_timeout: int = 600,
@@ -911,7 +834,6 @@ class JobManager:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.catalog = catalog
         self.scores = scores
-        self.ncu_launch_count = ncu_launch_count
         self.sandbox = sandbox
         self.judge_image = judge_image
         self.sandbox_timeout = sandbox_timeout
@@ -928,7 +850,6 @@ class JobManager:
         language: str,
         source: str,
         runner_name: str,
-        profile: bool,
         mode: str,
         username: str = "",
     ) -> Dict[str, Any]:
@@ -965,7 +886,6 @@ class JobManager:
             "challenge": challenge,
             "language": language,
             "runner_name": runner_name,
-            "profile": profile and not self.sandbox,
             "mode": mode,
             "source_hash": hashlib.sha256(encoded).hexdigest(),
             "source_code": source,
@@ -1014,8 +934,6 @@ class JobManager:
         patterns = {
             "execution": "execution.log",
             "result": "result.json",
-            "nsight": "nsight-compute.ncu-rep",
-            "nsight-csv": "nsight-details.csv",
         }
         filename = patterns.get(kind)
         if not filename:
@@ -1070,12 +988,9 @@ class JobManager:
         shutil.copy2(pending_solution, solution)
         with self.lock:
             job["solution_path"] = str(solution)
-        profile = "off" if self.sandbox else (
-            "auto" if job["mode"] == "submit" and job["profile"] else "off"
-        )
         if self.sandbox:
             command = self._sandbox_command(
-                challenge, solution, job["language"], job["mode"], profile,
+                challenge, solution, job["language"], job["mode"],
                 job_id=job_id,
             )
         else:
@@ -1091,10 +1006,6 @@ class JobManager:
                 str(job_dir),
                 "--tests",
                 "correctness" if job["mode"] == "test" else "all",
-                "--profile",
-                profile,
-                "--ncu-launch-count",
-                str(self.ncu_launch_count),
             ]
         (job_dir / "command.txt").write_text(
             subprocess.list2cmdline(command) + "\n", encoding="utf-8"
@@ -1182,7 +1093,6 @@ class JobManager:
         solution: Path,
         language: str,
         mode: str,
-        profile: str,
         job_id: str,
     ) -> List[str]:
         challenges_dir = self.catalog.challenges_dir
@@ -1199,10 +1109,6 @@ class JobManager:
             "/work",
             "--tests",
             "correctness" if mode == "test" else "all",
-            "--profile",
-            profile,
-            "--ncu-launch-count",
-            str(self.ncu_launch_count),
         ]
         # uid 65534 = nobody: 逃逸容器后无 docker socket 权限、不落在宿主用户身上。
         return [
@@ -1275,7 +1181,6 @@ class WebApplication:
         self,
         root: Path,
         data_dir: Path,
-        ncu_launch_count: int,
         challenges_dir: Path,
         sandbox: bool = False,
         judge_image: str = "leetgpu-judge",
@@ -1286,13 +1191,11 @@ class WebApplication:
         self.web_root = self.root / "web"
         self.catalog = ChallengeCatalog(challenges_dir)
         self.scores = ScoreStore(data_dir / "leaderboard.sqlite3")
-        self.settings = SettingsStore(data_dir / "settings.json", self.root / "ncu_reports")
         self.users = MultiuserStore(data_dir / "users.sqlite3")
         self.sandbox = sandbox
         self.auth_required = auth_required or sandbox
         self.jobs = JobManager(
             self.root, data_dir, self.catalog, self.scores,
-            ncu_launch_count=ncu_launch_count,
             sandbox=sandbox, judge_image=judge_image, sandbox_timeout=sandbox_timeout,
         )
         self.system = system_info()
@@ -1317,28 +1220,6 @@ class WebApplication:
             )
         return challenges
 
-    def export_nsight(self, job_id: str) -> Path:
-        report = self.jobs.artifact(job_id, "nsight")
-        if report is None:
-            raise FileNotFoundError("Nsight Compute report is not available")
-        job = self.jobs.public(job_id)
-        challenge = self.catalog.require(job["challenge"])
-        export_dir = Path(self.settings.public()["ncu_export_dir"])
-        export_dir.mkdir(parents=True, exist_ok=True)
-        filename = filesystem_name(f"{challenge['title']}_{job['runner_name']}") + ".ncu-rep"
-        destination = export_dir / filename
-        shutil.copy2(report, destination)
-        return destination
-
-    def open_nsight(self, job_id: str) -> Path:
-        report = self.jobs.artifact(job_id, "nsight")
-        if report is None:
-            raise FileNotFoundError("Nsight Compute report is not available")
-        executable = find_ncu_ui()
-        if executable is None:
-            raise FileNotFoundError("ncu-ui.exe was not found")
-        subprocess.Popen([str(executable), str(report)], close_fds=True)
-        return report
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -1511,8 +1392,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 ):
                     raise PermissionError("只能查看自己的源码")
                 self.send_json(submission)
-            elif parsed.path == "/api/settings":
-                self.send_json(self.app.settings.public())
             elif parsed.path == "/api/solutions":
                 user = self.require_user()
                 self.send_json(
@@ -1661,7 +1540,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                     language=str(body.get("language", "")),
                     source=str(body.get("source", "")),
                     runner_name=str(body.get("runner_name", "local")),
-                    profile=bool(body.get("profile", True)),
                     mode=str(body.get("mode", "submit")),
                     username=user["username"],
                 )
@@ -1733,35 +1611,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "registration_mode": self.app.registration_mode(),
                     "maintenance": self.app.users.site_setting("maintenance") == "1",
                 })
-            elif parsed.path == "/api/settings":
-                body = self.read_json()
-                directory = body.get("ncu_export_dir")
-                if not isinstance(directory, str):
-                    raise ValueError("ncu_export_dir must be a string")
-                self.send_json(self.app.settings.set_ncu_export_dir(directory))
-            elif parsed.path == "/api/settings/pick-directory":
-                current = self.app.settings.public()["ncu_export_dir"]
-                selected = choose_directory(current)
-                if selected:
-                    self.send_json(self.app.settings.set_ncu_export_dir(selected))
-                else:
-                    self.send_json(self.app.settings.public())
-            elif parsed.path.startswith("/api/jobs/"):
-                user = self.require_user()
-                parts = parsed.path.strip("/").split("/")
-                job_id = parts[2] if len(parts) >= 3 else ""
-                action = parts[3] if len(parts) == 4 else ""
-                job = self.app.jobs.public(job_id)
-                if user["role"] != "admin" and job.get("username", "") != user["username"]:
-                    raise PermissionError("只能操作自己的任务")
-                if action == "export-nsight":
-                    destination = self.app.export_nsight(job_id)
-                    self.send_json({"destination": str(destination)})
-                elif action == "open-nsight":
-                    report = self.app.open_nsight(job_id)
-                    self.send_json({"report": str(report)})
-                else:
-                    self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown job action")
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown API path")
         except PermissionError as exc:
@@ -1893,7 +1742,6 @@ def build_parser() -> argparse.ArgumentParser:
             "Defaults to LEETGPU_CHALLENGES_DIR or upstream/leetgpu-challenges/challenges."
         ),
     )
-    parser.add_argument("--ncu-launch-count", type=int, default=20)
     parser.add_argument("--no-browser", action="store_true")
     return parser
 
@@ -1923,7 +1771,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         app = WebApplication(
             root,
             (root / args.data_dir).resolve(),
-            args.ncu_launch_count,
             challenges_dir=challenges_dir,
             sandbox=args.sandbox,
             judge_image=args.judge_image,

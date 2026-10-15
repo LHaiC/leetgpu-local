@@ -819,6 +819,8 @@ a:focus-visible {
   line-height: 1.55;
   white-space: pre-wrap;
 }
+/* Don't render a bare black box when there is no log yet. */
+.execution-output:empty { display: none; }
 
 .leaderboard-toolbar {
   min-height: 58px;
@@ -1176,11 +1178,12 @@ body.authed .runner-field { display: none; }
 .toast-region {
   position: fixed;
   right: 18px;
-  bottom: 18px;
+  bottom: 76px; /* clear the submission bar / primary actions */
   z-index: 50;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  align-items: flex-end;
 }
 
 .toast {
@@ -1262,17 +1265,18 @@ body.authed .runner-field { display: none; }
 
 .primary-button,
 .secondary-button,
-.danger-button,
-.artifact-button {
-  min-height: 32px;
+.danger-button {
+  min-height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  padding: 0 11px;
+  padding: 0 14px;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .primary-button {
@@ -1280,12 +1284,13 @@ body.authed .runner-field { display: none; }
   color: #071109;
   background: var(--green);
 }
+.primary-button:hover { background: #55d383; }
 
-.secondary-button,
-.artifact-button {
+.secondary-button {
   color: var(--muted);
   background: var(--surface-raised);
 }
+.secondary-button:hover { color: var(--text); background: var(--surface-hover); }
 
 .danger-button {
   margin-right: auto;
@@ -1297,50 +1302,16 @@ body.authed .runner-field { display: none; }
 .primary-button svg,
 .secondary-button svg,
 .danger-button svg,
-.artifact-button svg,
 .artifact-link svg {
   width: 14px;
   height: 14px;
 }
 
-.settings-modal {
-  width: min(560px, calc(100vw - 32px));
-}
 
-.settings-body {
-  padding: 18px 16px 24px;
-}
 
-.settings-body label {
-  display: block;
-  margin-bottom: 7px;
-  color: var(--muted);
-  font-size: 10px;
-}
 
-.path-field {
-  height: 38px;
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: #111411;
-}
 
-.path-field:focus-within {
-  border-color: #4f745a;
-}
 
-.path-field input {
-  min-width: 0;
-  flex: 1;
-  padding: 0 10px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  font-family: Consolas, "Cascadia Code", monospace;
-  font-size: 10px;
-}
 
 @media (max-width: 1050px) {
   .content-grid {
@@ -1523,20 +1494,17 @@ body.authed .runner-field { display: none; }
   font-family: monospace;
   font-size: 11px;
   color: var(--green);
-  margin-left: auto;
+  margin-left: 0;
   min-width: 74px;
-  text-align: center;
+  text-align: left;
   visibility: hidden;
 }
 .vim-mode.on { visibility: visible; }
 .vim-normal { caret-color: var(--green); }
 #vim-toggle.active { color: var(--green); border-color: var(--green); }
 
-/* The vim-mode pill carries the right-side anchor now. */
-.submission-bar .test-button { margin-left: 0; }
-
-/* Nsight toggle right-aligned next to submit. */
-.submission-bar .profile-toggle { margin-left: 0; }
+/* vim indicator sits left; Test/Submit hug the right edge. */
+.submission-bar .test-button { margin-left: auto; }
 
 .announcements-bar {
   padding: 8px 16px;
@@ -1561,38 +1529,6 @@ body.authed .runner-field { display: none; }
   color: var(--fg);
 }
 .auth-error { color: var(--error, #f66); font-size: 12px; min-height: 14px; }
-
-.admin-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
-.admin-tabs button {
-  padding: 5px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.admin-tabs button.active { color: var(--fg); border-color: var(--accent); }
-.admin-pane { display: none; }
-.admin-pane.active { display: flex; flex-direction: column; gap: 10px; }
-.admin-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-.admin-row-main { display: flex; align-items: center; gap: 8px; }
-.admin-role { color: var(--muted); font-size: 12px; }
-#announcement-form { display: flex; flex-direction: column; gap: 8px; }
-#announcement-form input, #announcement-form textarea {
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--fg);
-  font-family: inherit;
-}
 .username-label { color: var(--muted); }
 
 /* ---------- gpu widget ---------- */
@@ -1643,44 +1579,6 @@ body.authed .runner-field { display: none; }
 }
 .maintenance-banner .lucide { width: 15px; height: 15px; }
 
-/* ---------- admin controls ---------- */
-.admin-controls { display: flex; flex-direction: column; gap: 12px; }
-.admin-field { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.admin-field select {
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-}
-.admin-add-user {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-}
-.admin-add-user input, .admin-add-user select {
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13px;
-}
-.admin-add-user input { flex: 1 1 120px; min-width: 0; }
-.admin-actions { display: flex; gap: 4px; }
-.pending-badge {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 8px;
-  background: var(--amber-soft);
-  color: var(--amber);
-  font-size: 11px;
-  margin-left: 6px;
-}
-
 /* ---------- ui polish: spacing + consistency ---------- */
 
 /* auth modal body */
@@ -1699,18 +1597,6 @@ body.authed .runner-field { display: none; }
 .auth-form .modal-actions { padding: 4px 0 0; border-top: none; }
 
 /* admin modal body */
-.admin-body { padding: 16px 20px 20px; }
-.admin-pane.active { gap: 14px; }
-.admin-add-user { padding: 12px; align-items: center; }
-.admin-add-user input, .admin-add-user select { height: 34px; }
-.admin-row { padding: 8px 12px; }
-#announcement-form input, #announcement-form textarea {
-  padding: 8px 12px;
-  background: var(--surface-raised);
-}
-#announcement-form input { height: 34px; }
-
-/* gpu widget: calmer transition, tooltip on hover */
 .gpu-bar-fill { transition: width .6s cubic-bezier(.4,0,.2,1), background .4s ease; }
 .gpu-widget { cursor: default; }
 .gpu-widget .lucide { color: var(--faint); }
@@ -1737,7 +1623,6 @@ body.authed .runner-field { display: none; }
 
 /* gpu widget tooltip via title is set in JS; here only cosmetics */
 .gpu-widget { padding: 6px 12px; gap: 8px; }
-.gpu-widget .gpu-bars { gap: 4px; }
 .gpu-label { font-size: 10px; }
 
 /* announcements tighter */
@@ -1746,3 +1631,166 @@ body.authed .runner-field { display: none; }
 /* icon buttons unify height */
 .icon-button { width: 32px; height: 32px; }
 .auth-button { height: 32px; padding: 0 14px; }
+
+/* ============================================================
+   Admin modal — consistent borders & breathing room
+   ============================================================ */
+.admin-modal { width: min(720px, calc(100vw - 32px)); }
+
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 12px 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+.admin-tabs button {
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.admin-tabs button:hover { color: var(--text); }
+.admin-tabs button.active {
+  color: var(--green);
+  background: var(--surface-raised);
+  border-color: var(--border);
+  margin-bottom: -1px;
+}
+
+.admin-body {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  max-height: min(560px, calc(100vh - 220px));
+  overflow-y: auto;
+}
+.admin-pane { display: none; }
+.admin-pane.active { display: flex; flex-direction: column; gap: 14px; }
+
+/* every input/select/textarea in admin gets a visible border */
+.admin-modal input[type="text"],
+.admin-modal input[type="password"],
+.admin-modal input:not([type]),
+.admin-modal select,
+.admin-modal textarea {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+}
+.admin-modal textarea { height: auto; padding: 10px 12px; resize: vertical; }
+.admin-modal input:focus,
+.admin-modal select:focus,
+.admin-modal textarea:focus {
+  border-color: var(--green);
+  outline: none;
+}
+
+/* announcement composer */
+#announcement-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+#announcement-form .primary-button { align-self: flex-end; min-width: 120px; }
+
+/* settings block (registration mode + maintenance) */
+.admin-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+.admin-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.admin-field select { min-width: 190px; }
+
+/* add-user form */
+.admin-add-user {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto auto;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+}
+.admin-add-user input { min-width: 0; }
+.admin-add-user select { height: 36px; }
+.admin-add-user .primary-button { min-width: 120px; }
+
+/* lists: rows get a border and never touch each other */
+#admin-users-list,
+#admin-announcements-list,
+#admin-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+.admin-row-main { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.admin-role { color: var(--faint); font-size: 12px; }
+.admin-actions { display: flex; gap: 6px; }
+.pending-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 9px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 11px;
+}
+#admin-pending-list .empty-state { padding: 32px 0; }
+
+/* ============================================================
+   Buttons / dialogs — consistency
+   ============================================================ */
+.ghost-button {
+  padding: 6px 2px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.ghost-button:hover { color: var(--green); text-decoration: underline; }
+
+/* Close buttons stay neutral, not accent-coloured. */
+.modal-head .icon-button { color: var(--muted); }
+.modal-head .icon-button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+/* Auth modal actions: link left, primary right. */
+.auth-form .modal-actions { justify-content: space-between; }

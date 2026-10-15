@@ -3,7 +3,7 @@
 
 Supported solution languages are CUDA, Triton, and PyTorch. Every invocation
 creates a timestamped directory containing the execution log, JSON results,
-build output, and (when available) an Nsight Compute report.
+and build output.
 """
 
 from __future__ import annotations
@@ -736,143 +736,6 @@ def run_benchmark(
     }
 
 
-def find_ncu() -> Optional[Path]:
-    configured = os.getenv("NCU_PATH")
-    if configured and Path(configured).is_file():
-        return Path(configured).resolve()
-    found = shutil.which("ncu") or shutil.which("ncu.exe")
-    if found:
-        path = Path(found).resolve()
-        if path.suffix.lower() == ".bat":
-            executable = path.parent / "target" / "windows-desktop-win7-x64" / "ncu.exe"
-            if executable.is_file():
-                return executable
-        return path
-    if os.name == "nt":
-        root = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "NVIDIA Corporation"
-        matches = sorted(root.glob("Nsight Compute */target/windows-desktop-win7-x64/ncu.exe"))
-        if matches:
-            return matches[-1]
-    return None
-
-
-def run_nsight_compute(
-    args,
-    run_dir: Path,
-    solution_path: Path,
-    binary: Optional[Path],
-) -> Dict[str, Any]:
-    ncu = find_ncu()
-    if ncu is None:
-        return {"status": "unavailable", "error": "ncu was not found"}
-
-    export_base = run_dir / "nsight-compute"
-    command = [
-        str(ncu),
-        "--set",
-        args.ncu_set,
-        "--target-processes",
-        "all",
-        "--force-overwrite",
-        "--export",
-        str(export_base),
-        "--launch-count",
-        str(args.ncu_launch_count),
-        sys.executable,
-        str(Path(__file__).resolve()),
-        str(args.challenge),
-        "--language",
-        args.language,
-        "--solution",
-        str(solution_path),
-        "--device",
-        args.device,
-        "--seed",
-        str(args.seed),
-        "--_profile-target",
-    ]
-    if binary is not None:
-        command.extend(("--_binary", str(binary)))
-
-    (run_dir / "nsight-command.txt").write_text(
-        subprocess.list2cmdline(command) + "\n", encoding="utf-8"
-    )
-    LOGGER.info(
-        "Starting Nsight Compute (%s set, up to %d launches)", args.ncu_set, args.ncu_launch_count
-    )
-    try:
-        result = subprocess.run(
-            command,
-            cwd=str(args.challenge),
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=args.ncu_timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        output = (exc.stdout or "") + "\n" + (exc.stderr or "")
-        (run_dir / "nsight-compute.log").write_text(output, encoding="utf-8")
-        return {"status": "timeout", "error": f"Nsight Compute exceeded {args.ncu_timeout}s"}
-
-    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
-    ncu_log = run_dir / "nsight-compute.log"
-    ncu_log.write_text(output, encoding="utf-8")
-    report_candidates = [export_base.with_suffix(".ncu-rep"), export_base]
-    report = next((path for path in report_candidates if path.is_file()), None)
-    profile = {
-        "status": "passed" if result.returncode == 0 and report else "failed",
-        "exit_code": result.returncode,
-        "log": str(ncu_log),
-        "report": str(report) if report else None,
-    }
-    if report:
-        csv_command = [str(ncu), "--import", str(report), "--csv", "--page", "details"]
-        csv_result = subprocess.run(
-            csv_command,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=120,
-            check=False,
-        )
-        csv_path = run_dir / "nsight-details.csv"
-        csv_path.write_text(csv_result.stdout, encoding="utf-8")
-        profile["csv"] = str(csv_path)
-    if profile["status"] == "failed":
-        profile["error"] = f"ncu exited with {result.returncode}; see {ncu_log}"
-    return profile
-
-
-def profile_target(args) -> int:
-    torch = require_torch()
-    require_gpu(torch, args.device)
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-    challenge_dir = resolve_challenge_dir(args.challenge)
-    challenge = load_challenge(challenge_dir, args.device)
-    signature, names, _ = signature_parts(challenge)
-    solution_path = resolve_solution(challenge_dir, args.language, args.solution)
-    binary = args._binary.resolve() if args._binary else None
-    solution, _, _ = make_solution(
-        args.language,
-        solution_path,
-        signature,
-        torch,
-        Path.cwd() / ".local_build",
-        binary=binary,
-    )
-    generated = normalize_generated_cases(challenge.generate_performance_test(), "performance")
-    case = materialize_case(generated[0], torch, args.device)
-    torch.cuda.synchronize()
-    torch.cuda.nvtx.range_push("leetgpu_solution")
-    try:
-        with torch.no_grad():
-            invoke_solution(solution, case, names)
-            torch.cuda.synchronize()
-    finally:
-        torch.cuda.nvtx.range_pop()
-    return 0
 
 
 def environment_info(torch, device: str) -> Dict[str, Any]:
@@ -987,24 +850,6 @@ def run_local(args, run_dir: Path) -> Tuple[int, Dict[str, Any]]:
             result["benchmark"]["gpu_ms"]["p95"],
         )
 
-    should_profile = args.profile == "on" or (args.profile == "auto" and correctness_ok)
-    if should_profile:
-        profile = run_nsight_compute(args, run_dir, solution_path, binary)
-        result["nsight_compute"] = profile
-        if profile["status"] == "passed":
-            LOGGER.info("Nsight Compute report: %s", profile["report"])
-        elif args.profile == "on":
-            correctness_ok = False
-            LOGGER.error("Nsight Compute failed: %s", profile.get("error", profile["status"]))
-        else:
-            LOGGER.warning(
-                "Nsight Compute skipped/failed: %s", profile.get("error", profile["status"])
-            )
-    elif args.profile != "off" and not correctness_ok:
-        result["nsight_compute"] = {
-            "status": "skipped",
-            "reason": "correctness tests did not pass",
-        }
 
     result["status"] = "passed" if correctness_ok else "failed"
     result["finished_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -1027,17 +872,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--log-root", type=Path, default=Path("logs"))
     parser.add_argument("--run-dir", type=Path, help="Use this exact output directory")
-    parser.add_argument(
-        "--profile",
-        choices=("auto", "on", "off"),
-        default="auto",
-        help="Nsight Compute behavior; auto profiles only after correctness passes",
-    )
-    parser.add_argument("--ncu-set", default="basic", help="Nsight Compute section set")
-    parser.add_argument("--ncu-launch-count", type=int, default=20)
-    parser.add_argument("--ncu-timeout", type=int, default=900)
-    parser.add_argument("--_profile-target", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--_binary", type=Path, help=argparse.SUPPRESS)
     return parser
 
 
@@ -1046,8 +880,6 @@ def validate_args(args) -> None:
         raise LocalRunnerError("--warmup cannot be negative")
     if args.repeat < 1:
         raise LocalRunnerError("--repeat must be at least 1")
-    if args.ncu_launch_count < 1:
-        raise LocalRunnerError("--ncu-launch-count must be at least 1")
     args.challenge = resolve_challenge_dir(args.challenge)
     if args.solution:
         args.solution = args.solution.expanduser().resolve()
@@ -1061,9 +893,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
     try:
         validate_args(args)
-        if args._profile_target:
-            configure_logging()
-            return profile_target(args)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

@@ -28,7 +28,6 @@
       "tab.leaderboard": "排行榜",
       // editor
       "editor.runner": "运行器",
-      "editor.nsight": "Nsight",
       "editor.test": "测试",
       "editor.submit": "提交并计分",
       "editor.starter": "初始代码",
@@ -68,11 +67,7 @@
       "ch.copy_code": "复制代码",
       // settings modal
       "set.title": "设置",
-      "set.ncu_dir": "Nsight Compute 报告导出目录",
-      "set.browse": "浏览…",
       "set.save": "保存",
-      "set.toggle": "提交时自动跑 Nsight Compute",
-      "set.toggle_hint": "生成 .ncu-rep 供下载，耗时约分钟级",
       "set.cancel": "取消",
       // auth
       "auth.login": "登录",
@@ -126,6 +121,49 @@
       "job.test_passed": "✅ 测试通过",
       "job.test_failed": "❌ 测试未通过",
       "job.job_label": "任务",
+      "job.executing": "GPU 正在执行",
+      "job.queue_pos": "队列第 {n} 位",
+      "job.waiting": "等待{mode}",
+      "job.running": "{mode}中",
+      "job.mode.test": "测试",
+      "job.mode.submit": "提交",
+      "res.empty": "暂无运行结果",
+      "res.compiler_output": "编译器输出",
+      "res.pass_detail_test": "完整正确性数据集已通过，不计入排行榜",
+      "res.pass_detail_submit": "完整提交已通过，成绩已写入排行榜",
+      "res.view_log": "查看执行日志",
+      "res.test_passed": "测试通过",
+      "res.submit_passed": "提交通过",
+      "res.test_failed": "测试未通过",
+      "res.submit_failed": "提交未通过",
+      "res.median": "中位耗时",
+      "res.best": "最佳耗时",
+      "res.execution_log": "执行日志",
+      "res.json_result": "JSON 结果",
+      "nav.error": "错误",
+      "sys.gpu_unavailable": "GPU 不可用",
+      "lb.best": "最佳成绩",
+      "lb.all_langs": "全部语言",
+      "lb.submitted": "提交时间",
+      "lb.empty_entries": "暂无有效成绩",
+      "lb.confirm_delete": "删除这条排行榜成绩？",
+      "lb.deleted": "排行榜成绩已删除",
+      "lb.delete_title": "删除成绩",
+      "modal.submission_title": "提交代码",
+      "admin.delete_title": "删除",
+      "admin.disabled_suffix": " · 已禁用",
+      "admin.enable": "启用",
+      "admin.disable": "禁用",
+      "editor.confirm_reset": "恢复当前语言的 Starter？",
+      "editor.copied": "代码已复制",
+      "editor.copy_failed": "无法访问剪贴板",
+      "editor.copy_code": "复制代码",
+      "sidebar.count": "{n} 道题",
+      "sidebar.submissions": "{n} 次提交",
+      "admin.pending_empty": "暂无待审核用户",
+      "misc.lang_switched": "已切换到中文",
+      "misc.role_user": "普通用户",
+      "misc.role_admin": "管理员",
     },
     en: {
       "app.title": "LeetGPU Local",
@@ -150,7 +188,6 @@
       "tab.results": "Results",
       "tab.leaderboard": "Leaderboard",
       "editor.runner": "Runner",
-      "editor.nsight": "Nsight",
       "editor.test": "Test",
       "editor.submit": "Submit & score",
       "editor.starter": "Starter",
@@ -189,11 +226,7 @@
       "ch.examples": "Examples",
       "ch.copy_code": "Copy code",
       "set.title": "Settings",
-      "set.ncu_dir": "Nsight Compute report export directory",
-      "set.browse": "Browse…",
       "set.save": "Save",
-      "set.toggle": "Profile with Nsight Compute on submit",
-      "set.toggle_hint": "Produces a .ncu-rep for download; takes minutes",
       "set.cancel": "Cancel",
       "auth.login": "Sign in",
       "auth.register": "Sign up",
@@ -239,6 +272,49 @@
       "job.test_passed": "✅ Tests passed",
       "job.test_failed": "❌ Tests failed",
       "job.job_label": "Job",
+      "job.executing": "Running on GPU",
+      "job.queue_pos": "Queue position {n}",
+      "job.waiting": "Waiting to {mode}",
+      "job.running": "{mode}…",
+      "job.mode.test": "test",
+      "job.mode.submit": "submit",
+      "res.empty": "No results yet",
+      "res.compiler_output": "Compiler output",
+      "res.pass_detail_test": "Full correctness set passed — not ranked",
+      "res.pass_detail_submit": "Full submission passed — score recorded",
+      "res.view_log": "Check the execution log",
+      "res.test_passed": "Tests passed",
+      "res.submit_passed": "Submission passed",
+      "res.test_failed": "Tests failed",
+      "res.submit_failed": "Submission failed",
+      "res.median": "Median",
+      "res.best": "Best",
+      "res.execution_log": "Execution log",
+      "res.json_result": "JSON result",
+      "nav.error": "Error",
+      "sys.gpu_unavailable": "GPU unavailable",
+      "lb.best": "Best results",
+      "lb.all_langs": "All languages",
+      "lb.submitted": "Submitted",
+      "lb.empty_entries": "No valid results yet",
+      "lb.confirm_delete": "Delete this leaderboard entry?",
+      "lb.deleted": "Leaderboard entry deleted",
+      "lb.delete_title": "Delete entry",
+      "modal.submission_title": "Submitted code",
+      "admin.delete_title": "Delete",
+      "admin.disabled_suffix": " · disabled",
+      "admin.enable": "Enable",
+      "admin.disable": "Disable",
+      "editor.confirm_reset": "Reset to the starter for this language?",
+      "editor.copied": "Code copied",
+      "editor.copy_failed": "Clipboard unavailable",
+      "editor.copy_code": "Copy code",
+      "sidebar.count": "{n} problems",
+      "sidebar.submissions": "{n} submissions",
+      "admin.pending_empty": "No pending users",
+      "misc.lang_switched": "Switched to English",
+      "misc.role_user": "User",
+      "misc.role_admin": "Admin",
     },
   };
 
@@ -249,8 +325,14 @@
       (navigator.language.startsWith("zh") ? "zh" : "en");
   }
 
-  function t(key) {
-    return DICT[current()][key] ?? DICT.en[key] ?? key;
+  function t(key, params) {
+    let value = DICT[current()][key] ?? DICT.en[key] ?? key;
+    if (params) {
+      for (const [name, replacement] of Object.entries(params)) {
+        value = value.split(`{${name}}`).join(String(replacement));
+      }
+    }
+    return value;
   }
 
   function apply(root = document) {
@@ -262,6 +344,10 @@
     });
     root.querySelectorAll("[data-i18n-title]").forEach((el) => {
       el.title = t(el.dataset.i18nTitle);
+    });
+    // Re-translate any elements tagged for locale-aware re-render.
+    document.querySelectorAll("[data-i18n-rerender]").forEach((el) => {
+      el.dispatchEvent(new CustomEvent("i18n:refresh"));
     });
     document.documentElement.lang = current() === "zh" ? "zh-CN" : "en";
   }
