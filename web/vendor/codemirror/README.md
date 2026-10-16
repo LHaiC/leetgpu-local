@@ -29,6 +29,7 @@ via the pinned version plus the update script.
 | `addon/edit/closebrackets.js` | auto-close brackets |
 | `addon/comment/comment.js` | toggle line comment |
 | `addon/search/searchcursor.js`, `addon/dialog/dialog.js`, `dialog.css` | `/` and `:` search prompts used by the Vim keymap |
+| `addon/hint/show-hint.js`, `show-hint.css` | completion popup (CUDA / C++ / Python vocabularies live in `web/editor-setup.js`) |
 
 Indentation guides are a small local overlay in `web/editor-setup.js` (CodeMirror
 5 has no built-in guides).

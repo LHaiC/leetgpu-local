@@ -19,6 +19,8 @@ FILES=(
   addon/comment/comment.js
   addon/search/searchcursor.js
   addon/dialog/dialog.js
+  addon/hint/show-hint.js
+  addon/hint/show-hint.css
   addon/dialog/dialog.css
   LICENSE
 )
