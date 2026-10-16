@@ -1005,6 +1005,10 @@ async function loadAdminUsers() {
                   title="${u.disabled ? I18N.t("admin.enable") : I18N.t("admin.disable")}">
             <i data-lucide="${u.disabled ? "user-check" : "user-x"}"></i>
           </button>
+          <button class="icon-button danger-icon" data-delete-user="${escapeHtml(u.username)}"
+                  title="${I18N.t("admin.delete_user")}">
+            <i data-lucide="trash-2"></i>
+          </button>
         </div>`,
       )
       .join("");
@@ -1015,6 +1019,21 @@ async function loadAdminUsers() {
           const action = b.dataset.disabled === "1" ? "enable" : "disable";
           await api(`/api/admin/users/${b.dataset.toggleUser}/${action}`, { method: "DELETE" });
           await loadAdminUsers();
+        }),
+      );
+    elements.adminUsersList
+      .querySelectorAll("[data-delete-user]")
+      .forEach((b) =>
+        b.addEventListener("click", async () => {
+          const name = b.dataset.deleteUser;
+          if (!window.confirm(I18N.t("admin.confirm_delete", { name }))) return;
+          try {
+            await api(`/api/admin/users/${encodeURIComponent(name)}`, { method: "DELETE" });
+            await loadAdminUsers();
+            toast(I18N.t("admin.deleted_user", { name }));
+          } catch (error) {
+            toast(error.message, "error");
+          }
         }),
       );
     refreshIcons();

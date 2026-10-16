@@ -468,6 +468,19 @@ class ScoreStore:
             raise KeyError(job_id)
         return dict(row)
 
+    def delete_user_data(self, username: str) -> None:
+        """Drop a deleted account's leaderboard rows.
+
+        Keeping them would let a later account with the same name inherit the
+        old scores.
+        """
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute("DELETE FROM scores WHERE username = ?", (username,))
+                connection.execute(
+                    "DELETE FROM submission_attempts WHERE username = ?", (username,)
+                )
+
     def delete(self, job_id: str) -> bool:
         with closing(self._connect()) as connection:
             with connection:
@@ -760,10 +773,33 @@ class MultiuserStore:
                     )
                 return cursor.rowcount > 0
 
+    def admin_count(self) -> int:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0"
+            ).fetchone()
+        return int(row[0])
+
     def delete_user(self, username: str) -> bool:
+        """Remove the account plus its sessions and saved drafts.
+
+        The last active admin cannot be deleted: that would lock everyone out of
+        administration. Leaderboard rows live in a different database and are
+        removed by ScoreStore.delete_user_data() — WebApplication.delete_user()
+        orchestrates both.
+        """
+        user = self.get_user(username)
+        if user is None:
+            return False
+        if user["role"] == "admin" and not user["disabled"] and self.admin_count() <= 1:
+            raise ApiError(
+                "The last admin cannot be deleted",
+                status=400,
+                code="last_admin",
+            )
         with closing(self._connect()) as connection:
             with connection:
-                cursor = connection.execute(
+                connection.execute(
                     "DELETE FROM users WHERE username = ?", (username,)
                 )
                 connection.execute(
@@ -772,7 +808,7 @@ class MultiuserStore:
                 connection.execute(
                     "DELETE FROM user_solutions WHERE username = ?", (username,)
                 )
-                return cursor.rowcount > 0
+        return True
 
     def change_password(self, username: str, old: str, new: str) -> bool:
         user = self.verify_login(username, old)
@@ -1401,6 +1437,13 @@ class WebApplication:
             return True
         return self.share_solutions()
 
+    def delete_user(self, username: str) -> bool:
+        """Delete an account and everything belonging to it, across both stores."""
+        if not self.users.delete_user(username):
+            return False
+        self.scores.delete_user_data(username)
+        return True
+
     def registration_open(self) -> bool:
         return self.registration_mode() == "open"
 
@@ -1983,7 +2026,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown user action")
             elif len(parts) == 4 and parts[:3] == ["api", "admin", "users"]:
                 self.require_admin()
-                self.send_json({"deleted": self.app.users.delete_user(parts[3])})
+                if not self.app.delete_user(parts[3]):
+                    raise ApiError("No such user", status=404, code="unknown_user")
+                self.send_json({"deleted": True})
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown API path")
         except ApiError as exc:
@@ -2000,6 +2045,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             LOGGER.exception("DELETE %s failed", self.path)
             self.send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+
 
 class ApplicationServer(ThreadingHTTPServer):
     daemon_threads = True

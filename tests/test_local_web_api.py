@@ -283,5 +283,106 @@ class SharedSolutionAccessTest(unittest.TestCase):
         self.assertEqual(status, 401)
 
 
+class UserDeletionTest(unittest.TestCase):
+    """Deleting an account must not leave inheritable data behind, and must not
+    be able to lock everyone out of administration."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        root = Path(__file__).resolve().parent.parent
+        challenges_dir = create_challenge_tree(Path(self.temporary.name))
+        self.app = WebApplication(
+            root,
+            Path(self.temporary.name) / "data",
+            challenges_dir=challenges_dir,
+            auth_required=True,
+        )
+        self.server = ApplicationServer(("127.0.0.1", 0), RequestHandler, self.app)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = f"http://127.0.0.1:{self.server.server_port}"
+        self.boss = self.register("boss", "boss-password")
+        self.member = self.register("member", "member-password")
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.app.jobs.stop()
+        self.temporary.cleanup()
+
+    def register(self, username, password):
+        request = Request(
+            f"{self.base}/api/auth/register",
+            data=json.dumps({"username": username, "password": password}).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(request, timeout=5) as response:
+            response.read()
+            return response.headers.get("Set-Cookie", "").split(";")[0]
+
+    def call(self, cookie, path, method="GET", body=None):
+        request = Request(
+            f"{self.base}{path}",
+            data=json.dumps(body).encode() if body is not None else None,
+            method=method,
+            headers={"Content-Type": "application/json", "Cookie": cookie},
+        )
+        try:
+            with urlopen(request, timeout=5) as response:
+                return response.status, json.load(response)
+        except HTTPError as error:
+            return error.code, json.loads(error.read() or b"{}")
+
+    def test_last_admin_cannot_be_deleted(self):
+        status, payload = self.call(self.boss, "/api/admin/users/boss", "DELETE")
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["code"], "last_admin")
+        self.assertIsNotNone(self.app.users.get_user("boss"))
+
+    def test_deleting_a_member_removes_their_scores_and_drafts(self):
+        challenge = "easy/1_synthetic_addition"
+        self.call(
+            self.member,
+            "/api/solutions",
+            "POST",
+            {"challenge": challenge, "language": "cuda", "source": "// member code"},
+        )
+        self.app.scores.record(
+            {
+                "id": "job-member",
+                "username": "member",
+                "challenge": challenge,
+                "runner_name": "member",
+                "language": "cuda",
+                "source_hash": "hash",
+                "source_code": "// member code",
+                "solution_path": "solution.cu",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "result_path": "result.json",
+            },
+            {
+                "status": "passed",
+                "challenge": challenge,
+                "environment": {"gpu": "Test GPU"},
+                "benchmark": {"gpu_ms": {"median": 1.0, "min": 0.9, "p95": 1.1}},
+            },
+        )
+        self.assertEqual(len(self.app.scores.leaderboard(challenge)), 1)
+
+        status, _ = self.call(self.boss, "/api/admin/users/member", "DELETE")
+        self.assertEqual(status, 200)
+        self.assertIsNone(self.app.users.get_user("member"))
+        self.assertIsNone(self.app.users.get_solution("member", challenge, "cuda"))
+        # A later account with the same name must not inherit the old score.
+        self.assertEqual(self.app.scores.leaderboard(challenge), [])
+        self.assertFalse(self.app.scores.delete("job-member"))
+
+    def test_deleting_an_unknown_user_is_a_404(self):
+        status, payload = self.call(self.boss, "/api/admin/users/nobody", "DELETE")
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["code"], "unknown_user")
+
+
 if __name__ == "__main__":
     unittest.main()
