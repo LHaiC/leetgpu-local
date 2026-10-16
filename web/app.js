@@ -37,6 +37,14 @@ const elements = {
   runnerName: document.querySelector("#runner-name"),
   sidebar: document.querySelector("#sidebar"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
+  shareToggle: document.querySelector("#share-toggle"),
+  sharedButton: document.querySelector("#shared-button"),
+  sharedCopy: document.querySelector("#shared-copy"),
+  sharedFork: document.querySelector("#shared-fork"),
+  sharedList: document.querySelector("#shared-list"),
+  sharedModal: document.querySelector("#shared-modal"),
+  sharedModalMeta: document.querySelector("#shared-modal-meta"),
+  sharedSource: document.querySelector("#shared-source"),
   solutionFilename: document.querySelector("#solution-filename"),
   systemStatus: document.querySelector("#system-status"),
   submissionModal: document.querySelector("#submission-modal"),
@@ -870,6 +878,68 @@ async function openProfile(username) {
   }
 }
 
+// ---------- shared (other users' saved) solutions ----------
+
+const sharedState = { owners: [], selected: null, source: "", shared: false };
+
+async function openShared() {
+  if (!state.currentKey) return;
+  try {
+    const data = await api(
+      `/api/solution/owners?challenge=${encodeURIComponent(state.currentKey)}&language=${encodeURIComponent(state.language)}`,
+    );
+    sharedState.owners = data.owners || [];
+    sharedState.shared = data.shared;
+    sharedState.selected = null;
+    sharedState.source = "";
+    elements.sharedSource.textContent = "";
+    elements.sharedModalMeta.textContent = data.shared ? "" : I18N.t("shared.members_hidden");
+    renderSharedList();
+    elements.sharedModal.showModal();
+    if (sharedState.owners.length) await selectShared(sharedState.owners[0].username);
+    else elements.sharedSource.textContent = I18N.t("shared.none_selected");
+    refreshIcons();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+function renderSharedList() {
+  if (!sharedState.owners.length) {
+    elements.sharedList.innerHTML = `<div class="empty-state">${I18N.t("shared.empty")}</div>`;
+    return;
+  }
+  elements.sharedList.innerHTML = sharedState.owners
+    .map((owner) => {
+      const mine = session.user && session.user.username === owner.username;
+      return `
+        <button class="shared-owner ${owner.username === sharedState.selected ? "active" : ""}"
+                data-owner="${escapeHtml(owner.username)}">
+          <span class="shared-owner-name">${escapeHtml(owner.username)}${mine ? ` <span class="muted">(${I18N.t("shared.mine")})</span>` : ""}</span>
+          <span class="shared-owner-meta">${formatTimestamp(owner.updated_at)} · ${owner.size} B</span>
+        </button>`;
+    })
+    .join("");
+  elements.sharedList.querySelectorAll("[data-owner]").forEach((button) => {
+    button.addEventListener("click", () => selectShared(button.dataset.owner));
+  });
+}
+
+async function selectShared(username) {
+  try {
+    const data = await api(
+      `/api/solution?challenge=${encodeURIComponent(state.currentKey)}` +
+        `&language=${encodeURIComponent(state.language)}&username=${encodeURIComponent(username)}`,
+    );
+    sharedState.selected = username;
+    sharedState.source = data.source || "";
+    elements.sharedSource.textContent = sharedState.source || I18N.t("shared.empty");
+    renderSharedList();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
 // ---------- announcements & admin ----------
 
 async function loadAnnouncements() {
@@ -996,6 +1066,7 @@ async function openAdmin() {
   const me = await api("/api/me");
   elements.registrationMode.value = me.registration_mode;
   elements.maintenanceToggle.checked = me.maintenance;
+  elements.shareToggle.checked = me.share_solutions;
   await loadAdminAnnouncements();
   await loadAdminUsers();
   await loadPendingUsers();
@@ -1097,6 +1168,35 @@ elements.runButton.addEventListener("click", () => submitRun("submit"));
 elements.leaderboardLanguage.addEventListener("change", loadBoard);
 elements.leaderboardTabs.querySelectorAll("button").forEach((button) => {
   button.addEventListener("click", () => setBoard(button.dataset.board));
+});
+elements.sharedButton.addEventListener("click", openShared);
+elements.sharedCopy.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(sharedState.source || "");
+    toast(I18N.t("shared.copied"));
+  } catch {
+    toast(I18N.t("editor.copy_failed"), "error");
+  }
+});
+elements.sharedFork.addEventListener("click", () => {
+  if (!editor || !sharedState.source) return;
+  editor.setValue(sharedState.source);
+  editor.clearHistory();
+  updateSubmitAvailability();
+  elements.sharedModal.close();
+  toast(I18N.t("shared.loaded"));
+});
+elements.shareToggle.addEventListener("change", async () => {
+  try {
+    await api("/api/admin/settings", {
+      method: "POST",
+      body: JSON.stringify({ share_solutions: elements.shareToggle.checked }),
+    });
+    toast(elements.shareToggle.checked ? I18N.t("shared.on") : I18N.t("shared.off"));
+  } catch (error) {
+    toast(error.message, "error");
+    elements.shareToggle.checked = !elements.shareToggle.checked;
+  }
 });
 elements.userMenuButton.addEventListener("click", () => {
   if (session.user) openProfile(session.user.username);

@@ -925,6 +925,31 @@ class MultiuserStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def solution_updated_at(
+        self, username: str, challenge_key: str, language: str
+    ) -> Optional[str]:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT updated_at FROM user_solutions "
+                "WHERE username = ? AND challenge_key = ? AND language = ?",
+                (username, challenge_key, language),
+            ).fetchone()
+        return row["updated_at"] if row else None
+
+    def solution_owners(self, challenge_key: str, language: str) -> List[Dict[str, Any]]:
+        """Who has a saved draft for this challenge/language, newest first."""
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT username, updated_at, LENGTH(source_code) AS size
+                FROM user_solutions
+                WHERE challenge_key = ? AND language = ?
+                ORDER BY updated_at DESC
+                """,
+                (challenge_key, language),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
 
 class JobManager:
     def __init__(
@@ -1364,6 +1389,18 @@ class WebApplication:
             return "open"
         return self.users.site_setting("registration_mode", "open")
 
+    def share_solutions(self) -> bool:
+        """Whether members may read each other's saved drafts. Off by default:
+        a draft is unfinished work, not a published solution."""
+        return self.users.site_setting("share_solutions", "0") == "1"
+
+    def can_read_solution(self, viewer: Mapping[str, Any], owner: str) -> bool:
+        if viewer.get("username") == owner:
+            return True
+        if viewer.get("role") == "admin":
+            return True
+        return self.share_solutions()
+
     def registration_open(self) -> bool:
         return self.registration_mode() == "open"
 
@@ -1573,6 +1610,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "registration_open": self.app.registration_open(),
                     "registration_mode": self.app.registration_mode(),
                     "maintenance": self.app.users.site_setting("maintenance") == "1",
+                    "share_solutions": self.app.share_solutions(),
                     "site_name": self.app.site_name,
                 })
             elif parsed.path == "/api/announcements":
@@ -1629,12 +1667,37 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
             elif parsed.path == "/api/solution":
                 user = self.require_user()
-                source = self.app.users.get_solution(
-                    user["username"],
-                    query.get("challenge", [""])[0],
-                    query.get("language", [""])[0],
-                )
-                self.send_json({"source": source})
+                challenge = query.get("challenge", [""])[0]
+                language = query.get("language", [""])[0]
+                owner = query.get("username", [""])[0] or user["username"]
+                if not self.app.can_read_solution(user, owner):
+                    raise ApiError(
+                        "This user's saved solution is not shared",
+                        status=403,
+                        code="solution_not_shared",
+                    )
+                if owner != user["username"] and self.app.users.get_user(owner) is None:
+                    raise ApiError("No such user", status=404, code="unknown_user")
+                self.send_json({
+                    "source": self.app.users.get_solution(owner, challenge, language),
+                    "username": owner,
+                    "updated_at": self.app.users.solution_updated_at(owner, challenge, language),
+                })
+            elif parsed.path == "/api/solution/owners":
+                user = self.require_user()
+                challenge = query.get("challenge", [""])[0]
+                language = query.get("language", [""])[0]
+                self.app.catalog.require(challenge)
+                if language not in LANGUAGES:
+                    raise ValueError("Invalid language")
+                owners = self.app.users.solution_owners(challenge, language)
+                # Always surface the viewer's own row; hide the rest unless shared.
+                if not self.app.share_solutions() and user["role"] != "admin":
+                    owners = [row for row in owners if row["username"] == user["username"]]
+                self.send_json({
+                    "owners": owners,
+                    "shared": self.app.share_solutions() or user["role"] == "admin",
+                })
             elif parsed.path == "/api/admin/users":
                 self.require_admin()
                 self.send_json({"users": self.app.users.list_users()})
@@ -1848,9 +1911,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.app.users.set_site_setting(
                         "maintenance", "1" if body["maintenance"] else "0"
                     )
+                if "share_solutions" in body:
+                    self.app.users.set_site_setting(
+                        "share_solutions", "1" if body["share_solutions"] else "0"
+                    )
                 self.send_json({
                     "registration_mode": self.app.registration_mode(),
                     "maintenance": self.app.users.site_setting("maintenance") == "1",
+                    "share_solutions": self.app.share_solutions(),
                 })
             else:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown API path")

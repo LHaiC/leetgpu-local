@@ -239,6 +239,9 @@
                   <span class="draft-state" id="draft-state">starter</span>
                 </div>
                 <div class="editor-actions">
+                  <button class="icon-button" id="shared-button" title="他人保存的解法" aria-label="shared solutions">
+                    <i data-lucide="users"></i>
+                  </button>
                   <button class="icon-button" id="undo-code" title="撤销 Ctrl+Z" aria-label="撤销">
                     <i data-lucide="undo-2"></i>
                   </button>
@@ -362,6 +365,13 @@
                 <span class="toggle-track"><span></span></span>
               </label>
             </div>
+            <div class="admin-field">
+              <span data-i18n="admin.share_solutions">允许成员互相查看已保存的解法</span>
+              <label class="profile-toggle">
+                <input id="share-toggle" type="checkbox" />
+                <span class="toggle-track"><span></span></span>
+              </label>
+            </div>
           </div>
           <form class="admin-add-user" id="add-user-form">
             <input id="add-username" data-i18n-placeholder="auth.username" placeholder="用户名" maxlength="32" required />
@@ -405,6 +415,29 @@
             <tbody id="profile-bests"></tbody>
           </table>
         </div>
+      </div>
+    </dialog>
+    <dialog class="modal shared-modal" id="shared-modal">
+      <div class="modal-head">
+        <div>
+          <h2 data-i18n="shared.title">他人保存的解法</h2>
+          <span id="shared-modal-meta"></span>
+        </div>
+        <button class="icon-button" data-close-dialog="shared-modal" aria-label="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="shared-body">
+        <div class="shared-list" id="shared-list"></div>
+        <pre class="source-preview shared-preview" id="shared-source"></pre>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" id="shared-copy">
+          <i data-lucide="copy"></i><span data-i18n="shared.copy">复制</span>
+        </button>
+        <button class="primary-button" id="shared-fork">
+          <i data-lucide="file-input"></i><span data-i18n="shared.fork">载入编辑器（覆盖我的草稿）</span>
+        </button>
       </div>
     </dialog>
   </body>

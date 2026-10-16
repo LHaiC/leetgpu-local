@@ -171,5 +171,117 @@ class LocalWebApiTest(unittest.TestCase):
             return json.load(response)
 
 
+class SharedSolutionAccessTest(unittest.TestCase):
+    """Saved drafts are private by default; admin can always read, members only
+    when the admin enables sharing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        root = Path(__file__).resolve().parent.parent
+        challenges_dir = create_challenge_tree(Path(cls.temporary.name))
+        cls.app = WebApplication(
+            root,
+            Path(cls.temporary.name) / "data",
+            challenges_dir=challenges_dir,
+            auth_required=True,
+        )
+        cls.server = ApplicationServer(("127.0.0.1", 0), RequestHandler, cls.app)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base = f"http://127.0.0.1:{cls.server.server_port}"
+        # First registration becomes the admin.
+        cls.boss = cls.register("boss", "boss-password")
+        cls.carol = cls.register("carol", "carol-password")
+        cls.dave = cls.register("dave", "dave-password")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.app.jobs.stop()
+        cls.temporary.cleanup()
+
+    @classmethod
+    def register(cls, username, password):
+        request = Request(
+            f"{cls.base}/api/auth/register",
+            data=json.dumps({"username": username, "password": password}).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(request, timeout=5) as response:
+            response.read()
+            return response.headers.get("Set-Cookie", "").split(";")[0]
+
+    def call(self, cookie, path, method="GET", body=None):
+        request = Request(
+            f"{self.base}{path}",
+            data=json.dumps(body).encode() if body is not None else None,
+            method=method,
+            headers={"Content-Type": "application/json", "Cookie": cookie},
+        )
+        try:
+            with urlopen(request, timeout=5) as response:
+                return response.status, json.load(response)
+        except HTTPError as error:
+            return error.code, json.loads(error.read() or b"{}")
+
+    def test_drafts_are_private_until_shared(self):
+        challenge = "easy/1_synthetic_addition"
+        status, _ = self.call(
+            self.carol,
+            "/api/solutions",
+            "POST",
+            {"challenge": challenge, "language": "cuda", "source": "// carol secret"},
+        )
+        self.assertEqual(status, 200)
+
+        # Another member cannot read it, and cannot even see that it exists.
+        status, _ = self.call(
+            self.dave, f"/api/solution?challenge={challenge}&language=cuda&username=carol"
+        )
+        self.assertEqual(status, 403)
+        _, owners = self.call(
+            self.dave, f"/api/solution/owners?challenge={challenge}&language=cuda"
+        )
+        self.assertEqual(owners["owners"], [])
+        self.assertFalse(owners["shared"])
+
+        # Carol reads her own draft.
+        status, payload = self.call(
+            self.carol, f"/api/solution?challenge={challenge}&language=cuda&username=carol"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["source"], "// carol secret")
+
+        # The admin can always read it.
+        status, payload = self.call(
+            self.boss, f"/api/solution?challenge={challenge}&language=cuda&username=carol"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["source"], "// carol secret")
+
+        # Once sharing is on, members see each other's drafts.
+        status, _ = self.call(
+            self.boss, "/api/admin/settings", "POST", {"share_solutions": True}
+        )
+        self.assertEqual(status, 200)
+        status, payload = self.call(
+            self.dave, f"/api/solution?challenge={challenge}&language=cuda&username=carol"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["source"], "// carol secret")
+        _, owners = self.call(
+            self.dave, f"/api/solution/owners?challenge={challenge}&language=cuda"
+        )
+        self.assertEqual([row["username"] for row in owners["owners"]], ["carol"])
+        self.assertTrue(owners["shared"])
+
+    def test_unauthenticated_cannot_read_drafts(self):
+        status, _ = self.call("", "/api/solution?challenge=easy/1_synthetic_addition&language=cuda")
+        self.assertEqual(status, 401)
+
+
 if __name__ == "__main__":
     unittest.main()
