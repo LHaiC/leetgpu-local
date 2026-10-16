@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import gzip
 import hmac
 import json
 import logging
@@ -353,6 +354,104 @@ class ScoreStore:
         with closing(self._connect()) as connection:
             rows = connection.execute(query, parameters).fetchall()
         return [dict(rank=index, **dict(row)) for index, row in enumerate(rows, 1)]
+
+    def overall_leaderboard(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Cross-challenge ranking per user.
+
+        `avg_percentile` is 1.0 when a user is first on every challenge they
+        entered and 0.0 when last, which makes challenges of different sizes
+        comparable. Single-entrant challenges are excluded from both averages
+        (they carry no ranking information).
+        """
+        query = """
+            WITH personal_best AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY challenge_key, username, language
+                    ORDER BY median_ms ASC, created_at ASC
+                ) AS personal_rank
+                FROM scores
+            ),
+            ranked AS (
+                SELECT
+                    username,
+                    challenge_key,
+                    language,
+                    RANK() OVER (
+                        PARTITION BY challenge_key, language ORDER BY median_ms ASC
+                    ) AS place,
+                    COUNT(*) OVER (PARTITION BY challenge_key, language) AS field
+                FROM personal_best
+                WHERE personal_rank = 1
+            )
+            SELECT
+                username,
+                COUNT(DISTINCT challenge_key) AS challenges,
+                COUNT(*) AS entries,
+                ROUND(AVG(CASE WHEN field > 1 THEN place END), 2) AS avg_place,
+                ROUND(AVG(CASE WHEN field > 1
+                               THEN (field - place) * 1.0 / (field - 1) END), 4)
+                    AS avg_percentile,
+                SUM(CASE WHEN place = 1 THEN 1 ELSE 0 END) AS wins,
+                MIN(place) AS best_place
+            FROM ranked
+            WHERE username != ''
+            GROUP BY username
+            ORDER BY avg_percentile DESC NULLS LAST, challenges DESC, wins DESC
+            LIMIT ?
+        """
+        with closing(self._connect()) as connection:
+            rows = connection.execute(query, (limit,)).fetchall()
+        return [dict(rank=index, **dict(row)) for index, row in enumerate(rows, 1)]
+
+    def user_profile(self, username: str) -> Dict[str, Any]:
+        """Aggregate stats plus per-challenge bests for one user."""
+        bests_query = """
+            WITH personal_best AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY challenge_key, username, language
+                    ORDER BY median_ms ASC, created_at ASC
+                ) AS personal_rank
+                FROM scores
+                WHERE username = ?
+            ),
+            ranked AS (
+                SELECT
+                    challenge_key,
+                    challenge_name,
+                    language,
+                    median_ms,
+                    min_ms,
+                    created_at,
+                    RANK() OVER (
+                        PARTITION BY challenge_key, language ORDER BY median_ms ASC
+                    ) AS place,
+                    COUNT(*) OVER (PARTITION BY challenge_key, language) AS field
+                FROM personal_best
+                WHERE personal_rank = 1
+            )
+            SELECT * FROM ranked
+            ORDER BY challenge_key, language
+        """
+        attempts_query = """
+            SELECT COUNT(*) AS submissions,
+                   SUM(CASE WHEN result_status = 'passed' THEN 1 ELSE 0 END) AS passed
+            FROM submission_attempts
+            WHERE username = ?
+        """
+        with closing(self._connect()) as connection:
+            bests = [dict(row) for row in connection.execute(bests_query, (username,))]
+            row = connection.execute(attempts_query, (username,)).fetchone()
+        summary = next(
+            (entry for entry in self.overall_leaderboard(1000) if entry["username"] == username),
+            None,
+        )
+        return {
+            "username": username,
+            "summary": summary,
+            "submissions": int(row["submissions"] or 0) if row else 0,
+            "passed": int(row["passed"] or 0) if row else 0,
+            "bests": bests,
+        }
 
     def submission(self, job_id: str) -> Dict[str, Any]:
         with closing(self._connect()) as connection:
@@ -1279,6 +1378,10 @@ class WebApplication:
 
 class RequestHandler(BaseHTTPRequestHandler):
     server_version = "LeetGPULocal/1.0"
+    # HTTP/1.0 (the http.server default) closes the socket after every
+    # response, so each of the ~20 assets needs its own TCP handshake. Every
+    # response here sets Content-Length, so HTTP/1.1 keep-alive is safe.
+    protocol_version = "HTTP/1.1"
 
     @property
     def app(self) -> WebApplication:
@@ -1308,21 +1411,68 @@ class RequestHandler(BaseHTTPRequestHandler):
             payload["code"] = code
         self.send_json(payload, status=status)
 
+    def _accepts_gzip(self) -> bool:
+        return "gzip" in self.headers.get("Accept-Encoding", "").lower()
+
+    def send_body(
+        self,
+        body: bytes,
+        content_type: str,
+        cache_control: Optional[str] = None,
+        etag: Optional[str] = None,
+        attachment_name: Optional[str] = None,
+    ) -> None:
+        """Single funnel for byte responses: ETag/304, gzip and length headers."""
+        if etag and self.headers.get("If-None-Match") == etag:
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self._security_headers()
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", cache_control or "no-cache")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        compressible = content_type.startswith(
+            ("text/", "application/javascript", "application/json", "image/svg+xml")
+        )
+        compressed = False
+        if compressible and len(body) > 512 and self._accepts_gzip():
+            body = gzip.compress(body, 6)
+            compressed = True
+
+        self.send_response(HTTPStatus.OK)
+        self._security_headers()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", cache_control or "no-store")
+        if etag:
+            self.send_header("ETag", etag)
+        if compressed:
+            self.send_header("Content-Encoding", "gzip")
+        if compressible:
+            self.send_header("Vary", "Accept-Encoding")
+        if attachment_name:
+            self.send_header(
+                "Content-Disposition", f'attachment; filename="{attachment_name}"'
+            )
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def send_file(self, path: Path, attachment: bool = False) -> None:
         if not path.is_file():
             self.send_error_json(HTTPStatus.NOT_FOUND, "File not found")
             return
-        body = path.read_bytes()
-        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        self.send_response(HTTPStatus.OK)
-        self._security_headers()
-        self.send_header("Content-Type", content_type)
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        if attachment:
-            self.send_header("Content-Disposition", f'attachment; filename="{path.name}"')
-        self.end_headers()
-        self.wfile.write(body)
+        stat = path.stat()
+        # Always revalidate: a 304 costs one small round-trip, while a stale
+        # max-age would keep serving old JS/CSS after an update.
+        etag = f'W/"{stat.st_size:x}-{stat.st_mtime_ns:x}"'
+        self.send_body(
+            path.read_bytes(),
+            mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+            cache_control="no-cache",
+            etag=etag,
+            attachment_name=path.name if attachment else None,
+        )
 
     def read_json(self) -> Dict[str, Any]:
         try:
@@ -1442,6 +1592,22 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_json(
                     {"scores": self.app.scores.leaderboard(challenge, language=language)}
                 )
+            elif parsed.path == "/api/leaderboard/overall":
+                self.send_json({"scores": self.app.scores.overall_leaderboard()})
+            elif parsed.path == "/api/profile":
+                user = self.require_user()
+                target = query.get("username", [""])[0] or user["username"]
+                if target != user["username"] and user["role"] != "admin":
+                    raise ApiError(
+                        "You can only view your own profile",
+                        status=403,
+                        code="own_profile_only",
+                    )
+                if self.app.users.get_user(target) is None:
+                    raise ApiError("No such user", status=404, code="unknown_user")
+                profile = self.app.scores.user_profile(target)
+                profile["account"] = self.app.users.get_user(target)
+                self.send_json(profile)
             elif parsed.path == "/api/leaderboard/source":
                 user = self.require_user()
                 submission = self.app.scores.submission(query.get("job", [""])[0])
@@ -1764,6 +1930,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 class ApplicationServer(ThreadingHTTPServer):
     daemon_threads = True
+    # Default is 5, which refuses connections when a browser fetches the ~20
+    # assets of this app in parallel (shows up as half-loaded pages).
+    request_queue_size = 128
+    allow_reuse_address = True
 
     def __init__(self, address, handler, app, secure_cookies: bool = False):
         super().__init__(address, handler)

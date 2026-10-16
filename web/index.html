@@ -9,8 +9,12 @@
     <link rel="stylesheet" href="/static/app.css" />
     <link rel="stylesheet" href="/static/vendor/codemirror/lib/codemirror.css" />
     <link rel="stylesheet" href="/static/vendor/codemirror/addon/dialog/dialog.css" />
+    <link rel="stylesheet" href="/static/vendor/codemirror/addon/hint/show-hint.css" />
     <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+      async
+    ></script>
     <script src="/static/vendor/codemirror/lib/codemirror.js" defer></script>
     <script src="/static/vendor/codemirror/keymap/vim.js" defer></script>
     <script src="/static/vendor/codemirror/mode/clike/clike.js" defer></script>
@@ -21,6 +25,7 @@
     <script src="/static/vendor/codemirror/addon/comment/comment.js" defer></script>
     <script src="/static/vendor/codemirror/addon/search/searchcursor.js" defer></script>
     <script src="/static/vendor/codemirror/addon/dialog/dialog.js" defer></script>
+    <script src="/static/vendor/codemirror/addon/hint/show-hint.js" defer></script>
     <script src="/static/editor-setup.js" defer></script>
     <script src="/static/i18n.js" defer></script>
     <script src="/static/app.js" defer></script>
@@ -167,9 +172,9 @@
 
               <div class="view-content leaderboard-view" id="leaderboard-view">
                 <div class="leaderboard-toolbar">
-                  <div>
-                    <span class="leaderboard-title" data-i18n="lb.best">最佳成绩</span>
-                    <span class="leaderboard-subtitle" id="leaderboard-subtitle"></span>
+                  <div class="leaderboard-tabs" role="tablist">
+                    <button class="active" data-board="challenge" data-i18n="lb.this_challenge">本题</button>
+                    <button data-board="overall" data-i18n="lb.overall">总榜</button>
                   </div>
                   <select id="leaderboard-language" aria-label="排行榜语言">
                     <option value="" data-i18n="lb.all_langs">全部语言</option>
@@ -178,23 +183,50 @@
                     <option value="pytorch">PyTorch</option>
                   </select>
                 </div>
-                <div class="table-wrap">
-                  <table class="leaderboard-table">
-                    <thead>
-                      <tr>
-                        <th data-i18n="lb.rank">排名</th>
-                        <th data-i18n="lb.user">用户</th>
-                        <th data-i18n="lb.lang">语言</th>
-                        <th data-i18n="lb.median">中位 (ms)</th>
-                        <th data-i18n="lb.submitted">提交时间</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody id="leaderboard-body"></tbody>
-                  </table>
+
+                <div class="leaderboard-pane active" id="board-challenge">
+                  <div class="leaderboard-subtitle-row">
+                    <span class="leaderboard-subtitle" id="leaderboard-subtitle"></span>
+                  </div>
+                  <div class="table-wrap">
+                    <table class="leaderboard-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="lb.rank">排名</th>
+                          <th data-i18n="lb.user">用户</th>
+                          <th data-i18n="lb.lang">语言</th>
+                          <th data-i18n="lb.median">中位 (ms)</th>
+                          <th data-i18n="lb.submitted">提交时间</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody id="leaderboard-body"></tbody>
+                    </table>
+                  </div>
+                  <div class="empty-state hidden" id="leaderboard-empty">
+                    <i data-lucide="chart-no-axes-column"></i><span data-i18n="lb.empty_entries">暂无有效成绩</span>
+                  </div>
                 </div>
-                <div class="empty-state hidden" id="leaderboard-empty">
-                  <i data-lucide="chart-no-axes-column"></i><span data-i18n="lb.empty_entries">暂无有效成绩</span>
+
+                <div class="leaderboard-pane" id="board-overall">
+                  <div class="table-wrap">
+                    <table class="leaderboard-table overall-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="lb.rank">排名</th>
+                          <th data-i18n="lb.user">用户</th>
+                          <th data-i18n="lb.solved">已解</th>
+                          <th data-i18n="lb.avg_place">平均名次</th>
+                          <th data-i18n="lb.avg_pct">平均百分位</th>
+                          <th data-i18n="lb.wins">冠军</th>
+                        </tr>
+                      </thead>
+                      <tbody id="overall-body"></tbody>
+                    </table>
+                  </div>
+                  <div class="empty-state hidden" id="overall-empty">
+                    <i data-lucide="chart-no-axes-column"></i><span data-i18n="lb.empty_entries">暂无有效成绩</span>
+                  </div>
                 </div>
               </div>
             </section>
@@ -344,6 +376,34 @@
         </div>
         <div class="admin-pane" id="admin-pending">
           <div id="admin-pending-list"><div class="empty-state" data-i18n="admin.pending_empty">暂无待审核用户</div></div>
+        </div>
+      </div>
+    </dialog>
+    <dialog class="modal profile-modal" id="profile-modal">
+      <div class="modal-head">
+        <div>
+          <h2 id="profile-name">—</h2>
+          <span id="profile-meta"></span>
+        </div>
+        <button class="icon-button" data-close-dialog="profile-modal" aria-label="关闭">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="profile-body">
+        <div class="profile-stats" id="profile-stats"></div>
+        <div class="profile-section-label" data-i18n="profile.bests">各题最佳</div>
+        <div class="table-wrap">
+          <table class="leaderboard-table profile-table">
+            <thead>
+              <tr>
+                <th data-i18n="profile.challenge">题目</th>
+                <th data-i18n="lb.lang">语言</th>
+                <th data-i18n="lb.median">中位 (ms)</th>
+                <th data-i18n="profile.place">名次</th>
+              </tr>
+            </thead>
+            <tbody id="profile-bests"></tbody>
+          </table>
         </div>
       </div>
     </dialog>

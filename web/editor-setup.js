@@ -142,6 +142,233 @@
     }
   }
 
+  const CPP_KEYWORDS = [
+    "alignas", "alignof", "auto", "bool", "break", "case", "catch", "char",
+    "class", "const", "constexpr", "continue", "default", "delete", "do",
+    "double", "else", "enum", "explicit", "extern", "false", "float", "for",
+    "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace",
+    "new", "noexcept", "nullptr", "operator", "private", "protected", "public",
+    "register", "restrict", "return", "short", "signed", "sizeof", "static",
+    "static_assert", "static_cast", "struct", "switch", "template", "this",
+    "throw", "true", "try", "typedef", "typename", "union", "unsigned",
+    "using", "virtual", "void", "volatile", "while",
+  ];
+
+  const PY_HINTS = [
+    "torch", "triton", "tl", "nn", "F", "Tensor", "tensor", "dtype", "device",
+    "shape", "arange", "empty_like", "zeros", "ones", "full", "float32",
+    "float16", "bfloat16", "matmul", "softmax", "relu", "sigmoid", "sum", "exp",
+    "sqrt", "rsqrt", "log", "abs", "maximum", "minimum", "where", "clamp",
+    "load", "store", "program_id", "num_warps", "num_stages", "constexpr",
+    "autotune", "cdiv", "static_range", "range", "and", "as", "assert",
+    "async", "await", "break", "class", "continue", "def", "del", "elif",
+    "else", "except", "False", "finally", "for", "from", "global", "if",
+    "import", "in", "is", "lambda", "None", "nonlocal", "not", "or", "pass",
+    "raise", "return", "True", "try", "while", "with", "yield", "all", "any",
+    "bool", "dict", "enumerate", "int", "len", "list", "map", "max", "min",
+    "print", "reversed", "round", "set", "sorted", "str", "tuple", "zip",
+  ];
+
+  /* ------------------------------------------------------------------
+     Autocomplete: CUDA/C++ vocabulary, Python/Triton vocabulary, plus
+     identifiers already present in the buffer.
+     ------------------------------------------------------------------ */
+  function vocabulary(language) {
+    if (language === "cuda") {
+      return [
+        { words: CUDA_KEYWORDS, kind: "kw" },
+        { words: CUDA_TYPES, kind: "ty" },
+        { words: CUDA_BUILTINS, kind: "fn" },
+        { words: CPP_KEYWORDS, kind: "kw" },
+      ];
+    }
+    return [{ words: PY_HINTS, kind: "fn" }];
+  }
+
+  function wordBeforeCursor(cm) {
+    const cursor = cm.getCursor();
+    const line = cm.getLine(cursor.line).slice(0, cursor.ch);
+    const match = /[A-Za-z_]\w*$/.exec(line);
+    if (!match) return { from: cursor, to: cursor, typed: "" };
+    return {
+      from: { line: cursor.line, ch: cursor.ch - match[0].length },
+      to: cursor,
+      typed: match[0],
+    };
+  }
+
+  function documentIdentifiers(cm) {
+    const found = new Set();
+    const pattern = /[A-Za-z_]\w{2,}/g;
+    const text = cm.getValue();
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      found.add(match[0]);
+      if (found.size > 800) break;
+    }
+    return found;
+  }
+
+  function buildHints(cm, language) {
+    const { from, to, typed } = wordBeforeCursor(cm);
+    const lower = typed.toLowerCase();
+    const seen = new Set();
+    const list = [];
+
+    const add = (text, kind, matchLower) => {
+      if (!text || seen.has(text)) return;
+      const matches = matchLower ? text.toLowerCase().startsWith(lower) : text.startsWith(typed);
+      if (!matches) return;
+      seen.add(text);
+      list.push({
+        text,
+        displayText: text,
+        className: `leet-hint-${kind}`,
+      });
+    };
+
+    for (const group of vocabulary(language)) {
+      for (const word of group.words) add(word, group.kind, false);
+    }
+    // Identifiers from the current solution are matched case-insensitively.
+    if (typed.length >= 2) {
+      for (const word of documentIdentifiers(cm)) add(word, "doc", true);
+    }
+    return { list: list.slice(0, 80), from, to };
+  }
+
+  function installCompletion(editor) {
+    const run = (cm, manual) => {
+      if (cm.state.completionActive) return;
+      if (!manual && wordBeforeCursor(cm).typed.length < 2) return;
+      cm.showHint({
+        hint: (instance, options) => buildHints(instance, options.language),
+        language: editor.getOption("mode") === "text/x-cuda" ? "cuda" : "python",
+        completeSingle: false,
+      });
+    };
+
+    editor.setOption("extraKeys", Object.assign({}, editor.getOption("extraKeys"), {
+      "Ctrl-Space": (cm) => run(cm, true),
+      "Cmd-Space": (cm) => run(cm, true),
+    }));
+
+    editor.on("inputRead", (cm, change) => {
+      if (change.origin !== "+input") return;
+      const inserted = change.text.join("");
+      if (!/[A-Za-z_]/.test(inserted)) return;
+      run(cm, false);
+    });
+  }
+
+  /* Vim's <C-a> increments the number under the cursor, which shadows the
+     browser's Select All. That one is worth reclaiming (incrementing is rarely
+     used here). <C-x>/<C-v> are left alone: they are genuine Vim commands
+     (decrement-number, blockwise visual) and vim.js cannot unmap its own
+     defaults, so overriding them would just break Vim instead of helping. */
+  function installSelectAllShortcut() {
+    const Vim = window.CodeMirror.Vim;
+    if (!Vim || typeof Vim.defineAction !== "function") return;
+
+    Vim.defineAction("leetSelectAll", (cm) => cm.execCommand("selectAll"));
+    for (const context of ["normal", "visual"]) {
+      // mapCommand unshifts, so this wins over the built-in default.
+      Vim.mapCommand("<C-a>", "action", "leetSelectAll", {}, { context });
+    }
+  }
+
+  /* Vim's yank/delete only fill internal registers. Real Vim users add
+     `set clipboard=unnamed` (or use "+y). We provide both: "+ / "* are backed by
+     the OS clipboard, and the unnamed register mirrors into it so a plain `y`
+     lands in the clipboard. No key binding is changed. */
+  function clipboardWrite(text) {
+    if (!text) return;
+    try {
+      navigator.clipboard?.writeText(text).catch(() => {});
+    } catch {
+      /* clipboard blocked (no permission / insecure context) */
+    }
+  }
+
+  function createClipboardRegister() {
+    return {
+      keyBuffer: [""],
+      linewise: false,
+      blockwise: false,
+      setText(text, linewise, blockwise) {
+        this.keyBuffer = [text || ""];
+        this.linewise = !!linewise;
+        this.blockwise = !!blockwise;
+        clipboardWrite(text);
+      },
+      pushText(text, linewise) {
+        if (linewise) {
+          if (!this.linewise) this.keyBuffer.push("\n");
+          this.linewise = true;
+        }
+        this.keyBuffer.push(text);
+        clipboardWrite(this.toString());
+      },
+      pushInsertModeChanges() {},
+      pushSearchQuery() {},
+      clear() {
+        this.keyBuffer = [];
+        this.linewise = false;
+        this.blockwise = false;
+      },
+      toString() {
+        return this.keyBuffer.join("");
+      },
+    };
+  }
+
+  function installClipboardRegisters(editor) {
+    const Vim = window.CodeMirror.Vim;
+    if (!Vim || typeof Vim.defineRegister !== "function") return;
+
+    const register = createClipboardRegister();
+
+    // vim.js rebuilds its register controller whenever it (re)enters vim mode,
+    // so this must be idempotent and re-applied on every mode change.
+    const ensure = () => {
+      const controller = Vim.getRegisterController?.();
+      const registers = controller?.registers;
+      if (!registers) return;
+      for (const name of ["+", "*"]) {
+        if (registers[name]) continue;
+        try {
+          Vim.defineRegister(name, register);
+        } catch {
+          /* another script defined it first */
+        }
+      }
+      // Patch the prototype, not the instance: the instance is replaced on
+      // every reset, the prototype object is stable.
+      const proto = Object.getPrototypeOf(controller);
+      if (proto && !proto.leetClipboardPatched) {
+        const original = proto.pushText;
+        proto.pushText = function (name, operator, text, linewise, blockwise) {
+          original.call(this, name, operator, text, linewise, blockwise);
+          // vim.js passes null (or '"') for the unnamed register that plain y/d
+          // write to, so mirror those yanks/deletes into the OS clipboard.
+          if ((name === null || name === undefined || name === "" || name === '"') && text) {
+            clipboardWrite(text);
+          }
+        };
+        proto.leetClipboardPatched = true;
+      }
+    };
+
+    ensure();
+    editor.on("vim-mode-change", ensure);
+
+    // Refresh the register cache when the user pastes from outside.
+    editor.getWrapperElement().addEventListener("paste", (event) => {
+      const text = event.clipboardData?.getData("text/plain");
+      if (text) register.setText(text, /\n$/.test(text), false);
+    });
+  }
+
   function modeFor(language) {
     return MODE_BY_LANGUAGE[language] || MODE_BY_LANGUAGE.cuda;
   }
@@ -175,6 +402,9 @@
     });
 
     editor.addOverlay(indentGuideOverlay);
+    installClipboardRegisters(editor);
+    installSelectAllShortcut();
+    installCompletion(editor);
 
     // Let Vim's `:w` / `:wq` persist the draft instead of doing nothing.
     if (window.CodeMirror.Vim && typeof window.CodeMirror.Vim.defineEx === "function") {

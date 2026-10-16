@@ -11,13 +11,22 @@ const elements = {
   deleteSubmission: document.querySelector("#delete-submission"),
   difficultyBadge: document.querySelector("#difficulty-badge"),
   draftState: document.querySelector("#draft-state"),
+  editorSurface: document.querySelector(".editor-surface"),
   executionOutput: document.querySelector("#execution-output"),
   languageSwitch: document.querySelector(".language-switch"),
   leaderboardBody: document.querySelector("#leaderboard-body"),
   leaderboardEmpty: document.querySelector("#leaderboard-empty"),
   leaderboardLanguage: document.querySelector("#leaderboard-language"),
   leaderboardSubtitle: document.querySelector("#leaderboard-subtitle"),
+  leaderboardTabs: document.querySelector(".leaderboard-tabs"),
   metricsStrip: document.querySelector("#metrics-strip"),
+  overallBody: document.querySelector("#overall-body"),
+  overallEmpty: document.querySelector("#overall-empty"),
+  profileBest: document.querySelector("#profile-bests"),
+  profileMeta: document.querySelector("#profile-meta"),
+  profileModal: document.querySelector("#profile-modal"),
+  profileName: document.querySelector("#profile-name"),
+  profileStats: document.querySelector("#profile-stats"),
   problemBody: document.querySelector("#problem-body"),
   queueState: document.querySelector("#queue-state"),
   redoCode: document.querySelector("#redo-code"),
@@ -357,16 +366,21 @@ async function selectChallenge(key) {
     applyDetail();
     return;
   }
+  const firstLoad = !state.detail;
   state.currentKey = key;
   localStorage.setItem("leetgpu.challenge", key);
   renderChallengeList();
-  elements.problemBody.innerHTML = `<div class="empty-state">${I18N.t("misc.loading")}</div>`;
+
+  // Dim the panes instead of flashing a "loading" placeholder, then fade the
+  // new content back in — keeps the switch from feeling like a page reload.
+  const panes = [elements.problemBody, elements.editorSurface].filter(Boolean);
+  if (!firstLoad) panes.forEach((pane) => pane.classList.add("switching"));
   try {
     state.detail = await api(`/api/challenge?key=${encodeURIComponent(key)}`);
     applyDetail();
     setLanguage(state.language);
     renderChallengeList();
-    loadLeaderboard();
+    loadBoard();
     if (window.MathJax?.typesetPromise) {
       window.MathJax.typesetClear?.([elements.problemBody]);
       window.MathJax.typesetPromise([elements.problemBody]).catch(() => {});
@@ -374,6 +388,8 @@ async function selectChallenge(key) {
     if (window.innerWidth <= 820) elements.sidebar.classList.remove("open");
   } catch (error) {
     toast(error.message, "error");
+  } finally {
+    requestAnimationFrame(() => panes.forEach((pane) => pane.classList.remove("switching")));
   }
 }
 
@@ -409,7 +425,7 @@ function setView(view) {
   document.querySelectorAll(".view-content").forEach((content) => {
     content.classList.toggle("active", content.id === `${view}-view`);
   });
-  if (view === "leaderboard") loadLeaderboard();
+  if (view === "leaderboard") loadBoard();
 }
 
 function stateIcon(kind) {
@@ -689,7 +705,7 @@ async function loadLeaderboard() {
         return `
           <tr class="leaderboard-row" data-job-id="${score.job_id}">
             <td class="rank-cell ${score.rank <= 3 ? "top" : ""}">#${score.rank}</td>
-            <td class="username-label">${escapeHtml(score.username || "—")}</td>
+            <td class="username-label">${userCell(score.username)}</td>
             <td class="language-label">${escapeHtml(score.language)}</td>
             <td>${formatMs(score.median_ms)}</td>
             <td class="time-cell" title="${escapeHtml(new Date(score.created_at).toLocaleString())}">${formatTimestamp(score.created_at)}</td>
@@ -708,6 +724,7 @@ async function loadLeaderboard() {
     elements.leaderboardBody.querySelectorAll(".leaderboard-row").forEach((row) => {
       row.addEventListener("click", () => openSubmission(row.dataset.jobId));
     });
+    bindProfileLinks(elements.leaderboardBody);
     elements.leaderboardBody.querySelectorAll("[data-delete-job]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -715,6 +732,113 @@ async function loadLeaderboard() {
       });
     });
     elements.leaderboardEmpty.classList.toggle("hidden", data.scores.length > 0);
+    refreshIcons();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+// ---------- overall ranking & profile ----------
+
+function setBoard(board) {
+  elements.leaderboardTabs.querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.board === board);
+  });
+  document.querySelectorAll(".leaderboard-pane").forEach((pane) => {
+    pane.classList.toggle("active", pane.id === `board-${board}`);
+  });
+  elements.leaderboardLanguage.classList.toggle("hidden", board === "overall");
+  if (board === "overall") loadOverall();
+}
+
+function loadBoard() {
+  const active =
+    elements.leaderboardTabs.querySelector("button.active")?.dataset.board || "challenge";
+  if (active === "overall") loadOverall();
+  else loadLeaderboard();
+}
+
+/** Renders a username, clickable when the viewer may open that profile. */
+function userCell(username) {
+  const name = username || "—";
+  const canOpen =
+    session.user && (session.user.role === "admin" || session.user.username === username);
+  if (!username || !canOpen) return escapeHtml(name);
+  return `<button class="user-link" data-profile="${escapeHtml(username)}">${escapeHtml(name)}</button>`;
+}
+
+function bindProfileLinks(root) {
+  root.querySelectorAll("[data-profile]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openProfile(button.dataset.profile);
+    });
+  });
+}
+
+async function loadOverall() {
+  try {
+    const data = await api("/api/leaderboard/overall");
+    const scores = data.scores || [];
+    elements.overallBody.innerHTML = scores
+      .map((row) => {
+        const mine = session.user && session.user.username === row.username;
+        const pct = row.avg_percentile === null ? "—" : `${Math.round(row.avg_percentile * 100)}%`;
+        return `
+          <tr class="leaderboard-row ${mine ? "is-me" : ""}">
+            <td class="rank-cell ${row.rank <= 3 ? "top" : ""}">#${row.rank}</td>
+            <td class="username-label">${userCell(row.username)}</td>
+            <td>${row.challenges}</td>
+            <td>${row.avg_place === null ? "—" : row.avg_place}</td>
+            <td>${pct}</td>
+            <td>${row.wins}</td>
+          </tr>`;
+      })
+      .join("");
+    bindProfileLinks(elements.overallBody);
+    elements.overallEmpty.classList.toggle("hidden", scores.length > 0);
+    refreshIcons();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function openProfile(username) {
+  try {
+    const profile = await api(`/api/profile?username=${encodeURIComponent(username)}`);
+    const summary = profile.summary || {};
+    elements.profileName.textContent = profile.username;
+    const account = profile.account;
+    elements.profileMeta.textContent = account?.created_at
+      ? `${I18N.t("profile.joined")} ${formatTimestamp(account.created_at)}`
+      : "";
+    const stat = (label, value) =>
+      `<div class="metric"><span class="metric-label">${label}</span><span class="metric-value">${value}</span></div>`;
+    elements.profileStats.innerHTML = [
+      stat(I18N.t("lb.solved"), summary.challenges ?? 0),
+      stat(I18N.t("lb.avg_place"), summary.avg_place ?? "—"),
+      stat(
+        I18N.t("lb.avg_pct"),
+        summary.avg_percentile === null || summary.avg_percentile === undefined
+          ? "—"
+          : `${Math.round(summary.avg_percentile * 100)}%`,
+      ),
+      stat(I18N.t("lb.wins"), summary.wins ?? 0),
+      stat(I18N.t("profile.submissions"), profile.submissions),
+      stat(I18N.t("profile.passed"), profile.passed),
+    ].join("");
+    elements.profileBest.innerHTML = profile.bests
+      .map(
+        (best) => `
+        <tr>
+          <td class="profile-challenge">${escapeHtml(best.challenge_name || best.challenge_key)}</td>
+          <td class="language-label">${escapeHtml(best.language)}</td>
+          <td>${formatMs(best.median_ms)}</td>
+          <td>${best.place}${best.field > 1 ? ` <span class="muted">/ ${best.field}</span>` : ""}</td>
+        </tr>`,
+      )
+      .join("");
+    elements.profileModal.showModal();
     refreshIcons();
   } catch (error) {
     toast(error.message, "error");
@@ -945,7 +1069,13 @@ elements.resetCode.addEventListener("click", () => {
 });
 elements.testButton.addEventListener("click", () => submitRun("test"));
 elements.runButton.addEventListener("click", () => submitRun("submit"));
-elements.leaderboardLanguage.addEventListener("change", loadLeaderboard);
+elements.leaderboardLanguage.addEventListener("change", loadBoard);
+elements.leaderboardTabs.querySelectorAll("button").forEach((button) => {
+  button.addEventListener("click", () => setBoard(button.dataset.board));
+});
+elements.userMenuButton.addEventListener("click", () => {
+  if (session.user) openProfile(session.user.username);
+});
 elements.sidebarToggle.addEventListener("click", () => elements.sidebar.classList.toggle("open"));
 elements.deleteSubmission.addEventListener("click", () => {
   if (state.selectedSubmission) deleteSubmission(state.selectedSubmission.job_id);

@@ -2066,3 +2066,120 @@ body { background-image: none; }
 .result-state-body strong,
 .result-state-body span { white-space: normal; }
 .progress-track { flex: 0 0 auto; }
+
+/* ============================================================
+   Autocomplete popup (CodeMirror show-hint) — dark theme
+   ============================================================ */
+.CodeMirror-hints {
+  z-index: 20;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  font-family: Consolas, "Cascadia Code", monospace;
+  font-size: 12px;
+}
+.CodeMirror-hint {
+  padding: 4px 8px;
+  border-radius: 5px;
+  color: var(--text);
+}
+li.CodeMirror-hint-active {
+  color: #071109;
+  background: var(--green);
+}
+/* Word category colouring, visible in both states. */
+.leet-hint-kw { color: #82aaff; font-weight: 600; }
+.leet-hint-ty { color: #ffcb6b; }
+.leet-hint-fn { color: #89ddff; }
+.leet-hint-doc { color: var(--muted); }
+li.CodeMirror-hint-active .leet-hint-kw,
+li.CodeMirror-hint-active .leet-hint-ty,
+li.CodeMirror-hint-active .leet-hint-fn,
+li.CodeMirror-hint-active .leet-hint-doc { color: #071109; }
+
+/* ============================================================
+   Smooth pane switching when changing challenges
+   ============================================================ */
+.problem-body,
+.editor-surface {
+  transition: opacity 0.16s ease;
+}
+.problem-body.switching,
+.editor-surface.switching { opacity: 0.25; }
+
+/* ============================================================
+   Leaderboard boards (this problem / overall)
+   ============================================================ */
+.leaderboard-tabs { display: flex; gap: 4px; }
+.leaderboard-tabs button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.leaderboard-tabs button:hover { color: var(--text); }
+.leaderboard-tabs button.active {
+  color: var(--green);
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.leaderboard-subtitle-row { padding: 10px 16px 0; }
+.leaderboard-subtitle { color: var(--muted); font-size: 12px; }
+
+.leaderboard-pane { display: none; }
+.leaderboard-pane.active { display: block; }
+
+.leaderboard-row.is-me { background: rgba(72, 199, 116, 0.07); }
+.overall-table th:nth-child(1) { width: 42px; }
+.overall-table th:nth-child(4),
+.overall-table th:nth-child(5),
+.overall-table th:nth-child(6) { width: 16%; }
+.muted { color: var(--faint); }
+
+.user-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-bottom: 1px dashed var(--border-strong);
+}
+.user-link:hover { color: var(--green); border-color: var(--green); }
+
+/* ============================================================
+   Profile modal
+   ============================================================ */
+.profile-modal { width: min(720px, calc(100vw - 32px)); }
+.profile-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 22px;
+  max-height: min(560px, calc(100vh - 220px));
+  overflow-y: auto;
+}
+.profile-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--border);
+}
+.profile-stats .metric { background: var(--surface-raised); }
+.profile-section-label {
+  color: var(--faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.profile-table td { height: 34px; }
+.profile-challenge { font-weight: 600; }
+.profile-table { table-layout: auto; }
