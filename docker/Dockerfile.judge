@@ -19,10 +19,20 @@ RUN apt-get update \
 
 # cu126 wheels match the CUDA 12.6 toolkit in this image. Triton wheels ship
 # their own ptxas so the toolkit version and triton stay consistent.
+#
+# Keep this layer *after* pip: it changes more often than the torch install and
+# re-downloading ~2.5 GB of wheels on every tweak would be absurd.
 RUN pip3 install --no-cache-dir --break-system-packages \
         torch --index-url https://download.pytorch.org/whl/cu126 \
     && pip3 install --no-cache-dir --break-system-packages \
         triton numpy
+
+# Triton compiles a tiny CUDA driver shim with the system gcc on first use, and
+# that shim includes <Python.h>. Without python3-dev those challenges fail at
+# reference-implementation time with "fatal error: Python.h: No such file".
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Non-root, network-isolated execution is enforced via `docker run` flags in
 # scripts/local_web.py (--network none, --cap-drop ALL, --read-only).

@@ -1251,7 +1251,12 @@ class JobManager:
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
             "--read-only",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=2g",
+            # Docker's tmpfs default is noexec/nodev, and just omitting noexec
+            # is not enough — it must be overridden with an explicit `exec`.
+            # Triton compiles a CUDA driver shim into its cache here and then
+            # dlopen()s it; without `exec` those challenges die with
+            # "failed to map segment from shared object".
+            "--tmpfs", "/tmp:rw,nosuid,exec,size=2g",
             "--ipc", "none",
             "--pids-limit", "256",
             "--memory", "8g",

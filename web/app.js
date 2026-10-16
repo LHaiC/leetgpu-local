@@ -105,6 +105,7 @@ const state = {
   activeJob: null,
   pollTimer: null,
   saveTimer: null,
+  running: false,
   selectedSubmission: null,
 };
 
@@ -269,6 +270,15 @@ function saveDraft() {
   }
 }
 
+/** Submit/Test are only usable with a non-empty buffer and no job in flight. */
+function updateSubmitAvailability() {
+  const empty = !editor || !editor.getValue().trim();
+  const disabled = empty || state.running === true;
+  elements.runButton.disabled = disabled;
+  elements.testButton.disabled = disabled;
+  elements.runButton.title = empty ? I18N.t("editor.empty_hint") : "";
+}
+
 function updateHistoryButtons() {
   if (!editor) return;
   const size = editor.historySize();
@@ -293,6 +303,7 @@ function redoEditor() {
 function recordEditorEdit() {
   if (!editor) return;
   elements.draftState.textContent = "edited";
+  updateSubmitAvailability();
   updateHistoryButtons();
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(saveDraft, 500);
@@ -323,6 +334,7 @@ async function loadCode() {
   elements.draftState.textContent =
     server !== null ? "server" : local === null ? "starter" : "saved";
   elements.solutionFilename.textContent = filenames[state.language];
+  updateSubmitAvailability();
   updateHistoryButtons();
 }
 
@@ -378,6 +390,7 @@ async function selectChallenge(key) {
   try {
     state.detail = await api(`/api/challenge?key=${encodeURIComponent(key)}`);
     applyDetail();
+    ensureAvailableLanguage();
     setLanguage(state.language);
     renderChallengeList();
     loadBoard();
@@ -403,6 +416,18 @@ function applyDetail() {
   document.querySelector("#access-tier").textContent = detail.access_tier;
   elements.problemBody.innerHTML = detail.problem_html;
   elements.leaderboardSubtitle.textContent = detail.title;
+}
+
+/** Some challenges ship only a subset of languages (e.g. 41_simple_inference
+    has no CUDA starter). Never leave the editor on a language that has none. */
+function ensureAvailableLanguage() {
+  const starters = state.detail?.starters;
+  if (!starters) return;
+  if (starters[state.language]) return;
+  const fallback = Object.keys(filenames).find((lang) => starters[lang]);
+  if (!fallback) return;
+  state.language = fallback;
+  localStorage.setItem("leetgpu.language", fallback);
 }
 
 function setLanguage(language) {
@@ -595,8 +620,8 @@ function renderCompleted(job) {
   elements.queueState.textContent = I18N.t("nav.idle");
   elements.queueState.classList.remove("busy");
   elements.executionOutput.classList.remove("streaming");
-  elements.runButton.disabled = false;
-  elements.testButton.disabled = false;
+  state.running = false;
+  updateSubmitAvailability();
   elements.resultIndicator.classList.remove("visible");
   refreshIcons();
 }
@@ -624,8 +649,8 @@ async function pollJob(jobId) {
 
 async function submitRun(mode) {
   if (!state.currentKey || !editor || !editor.getValue().trim()) return;
-  elements.runButton.disabled = true;
-  elements.testButton.disabled = true;
+  state.running = true;
+  updateSubmitAvailability();
   localStorage.setItem("leetgpu.runner", elements.runnerName.value.trim() || "local");
   saveDraft();
   setView("results");
@@ -649,8 +674,8 @@ async function submitRun(mode) {
     if (mode === "submit") await refreshChallengeProgress();
     pollJob(job.id);
   } catch (error) {
-    elements.runButton.disabled = false;
-    elements.testButton.disabled = false;
+    state.running = false;
+    updateSubmitAvailability();
     toast(error.message, "error");
   }
 }

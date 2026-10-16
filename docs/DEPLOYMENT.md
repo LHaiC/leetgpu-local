@@ -34,7 +34,31 @@ git clone https://github.com/AlphaGPU/leetgpu-challenges upstream/leetgpu-challe
 ./scripts/build_judge_image.sh    # 构建 leetgpu-judge（cuda devel + torch + triton）
 ```
 
-### 4. 启动
+镜像里两个**必须**具备的东西（否则部分题目跑不起来，且报错很误导）：
+
+| 依赖 | 不加会怎样 |
+|---|---|
+| `python3-dev`（提供 `Python.h`） | Triton 首次使用会用系统 gcc 编译一个 CUDA driver 小模块，报 `fatal error: Python.h: No such file or directory` |
+| 容器 `/tmp` 必须可执行 | Triton 把该模块编译进缓存后再 `dlopen`。Docker 的 tmpfs 默认带 `noexec`，**必须显式写 `exec`** 才能覆盖，否则报 `failed to map segment from shared object` |
+
+沙箱启动参数里已经带了 `--tmpfs /tmp:rw,nosuid,exec,size=2g`，Dockerfile 里也装了 `python3-dev`。
+
+### 4. 自检：题库是否都能跑
+
+换题库版本（或改镜像）后，先跑这个，别等用户报障：
+
+```bash
+cd /path/to/projects            # 含 leetgpu-local 与 leetgpu-challenges 的目录
+docker run --rm --network none --gpus all --user 65534:65534 \
+    -v "$PWD/leetgpu-local:/judge/repo:ro" \
+    -v "$PWD/leetgpu-challenges/challenges:/judge/challenges:ro" \
+    -e HOME=/tmp -e TMPDIR=/tmp \
+    leetgpu-judge python3 /judge/repo/scripts/check_challenges.py
+```
+
+它逐题加载 `challenge.py`、生成测试用例并跑**参考实现**，不涉及用户解法。退出码非 0 说明有题目对所有人都跑不通。当前基线：`checked: 131   failed: 0`。
+
+### 5. 启动
 
 ```bash
 python3 scripts/local_web.py \
