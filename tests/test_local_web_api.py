@@ -1,3 +1,4 @@
+import http.client
 import json
 import tempfile
 import threading
@@ -282,10 +283,39 @@ class SharedSolutionAccessTest(unittest.TestCase):
         status, _ = self.call("", "/api/solution?challenge=easy/1_synthetic_addition&language=cuda")
         self.assertEqual(status, 401)
 
+    def test_unread_request_body_does_not_corrupt_the_next_request(self):
+        """HTTP/1.1 keep-alive reuses the socket, so a POST whose body the
+        handler ignores (logout sends '{}') must still be drained — otherwise
+        the leftover bytes are parsed as the next request line and the browser
+        sees `501 Unsupported method ('{}GET')`."""
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_port, timeout=5
+        )
+        try:
+            connection.request(
+                "POST",
+                "/api/auth/logout",
+                body="{}",
+                headers={"Content-Type": "application/json", "Cookie": self.carol},
+            )
+            first = connection.getresponse()
+            first.read()
+            self.assertLess(first.status, 400)
+
+            connection.request("GET", "/api/me")
+            second = connection.getresponse()
+            payload = json.loads(second.read())
+            self.assertEqual(second.status, 200)
+            self.assertIn("auth_required", payload)
+        finally:
+            connection.close()
+
 
 class UserDeletionTest(unittest.TestCase):
-    """Deleting an account must not leave inheritable data behind, and must not
-    be able to lock everyone out of administration."""
+    """Deleting an account erases its data (including leaderboard history) and
+    retires the name permanently, so a later account can neither impersonate the
+    former member nor inherit their standing. The last admin can never be
+    deleted."""
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -334,29 +364,17 @@ class UserDeletionTest(unittest.TestCase):
         except HTTPError as error:
             return error.code, json.loads(error.read() or b"{}")
 
-    def test_last_admin_cannot_be_deleted(self):
-        status, payload = self.call(self.boss, "/api/admin/users/boss", "DELETE")
-        self.assertEqual(status, 400)
-        self.assertEqual(payload["code"], "last_admin")
-        self.assertIsNotNone(self.app.users.get_user("boss"))
-
-    def test_deleting_a_member_removes_their_scores_and_drafts(self):
+    def add_score(self, username):
         challenge = "easy/1_synthetic_addition"
-        self.call(
-            self.member,
-            "/api/solutions",
-            "POST",
-            {"challenge": challenge, "language": "cuda", "source": "// member code"},
-        )
         self.app.scores.record(
             {
-                "id": "job-member",
-                "username": "member",
+                "id": f"job-{username}",
+                "username": username,
                 "challenge": challenge,
-                "runner_name": "member",
+                "runner_name": username,
                 "language": "cuda",
                 "source_hash": "hash",
-                "source_code": "// member code",
+                "source_code": "// code",
                 "solution_path": "solution.cu",
                 "created_at": "2026-01-01T00:00:00+00:00",
                 "result_path": "result.json",
@@ -368,20 +386,76 @@ class UserDeletionTest(unittest.TestCase):
                 "benchmark": {"gpu_ms": {"median": 1.0, "min": 0.9, "p95": 1.1}},
             },
         )
+        return challenge
+
+    def test_last_admin_cannot_be_deleted(self):
+        status, payload = self.call(self.boss, "/api/admin/users/boss", "DELETE")
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["code"], "last_admin")
+        self.assertFalse(self.app.users.get_user("boss")["deleted"])
+
+    def test_deleting_removes_history_and_retires_the_name(self):
+        challenge = self.add_score("member")
+        self.call(
+            self.member,
+            "/api/solutions",
+            "POST",
+            {"challenge": challenge, "language": "cuda", "source": "// member code"},
+        )
         self.assertEqual(len(self.app.scores.leaderboard(challenge)), 1)
 
         status, _ = self.call(self.boss, "/api/admin/users/member", "DELETE")
         self.assertEqual(status, 200)
-        self.assertIsNone(self.app.users.get_user("member"))
+
+        # Credentials, drafts and leaderboard history are all gone.
+        self.assertIsNone(self.app.users.verify_login("member", "member-password"))
         self.assertIsNone(self.app.users.get_solution("member", challenge, "cuda"))
-        # A later account with the same name must not inherit the old score.
         self.assertEqual(self.app.scores.leaderboard(challenge), [])
         self.assertFalse(self.app.scores.delete("job-member"))
+
+        # Only a tombstone is left, and it keeps the name reserved.
+        tombstone = self.app.users.get_user("member")
+        self.assertTrue(tombstone["deleted"])
+        self.assertEqual(tombstone["role"], "user")
+        status, payload = self.call(
+            self.boss,
+            "/api/auth/register",
+            "POST",
+            {"username": "member", "password": "another-password"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["code"], "username_retired")
 
     def test_deleting_an_unknown_user_is_a_404(self):
         status, payload = self.call(self.boss, "/api/admin/users/nobody", "DELETE")
         self.assertEqual(status, 404)
         self.assertEqual(payload["code"], "unknown_user")
+
+    def test_rejecting_a_pending_registration_frees_the_name(self):
+        status, _ = self.call(
+            self.boss, "/api/admin/settings", "POST", {"registration_mode": "review"}
+        )
+        self.assertEqual(status, 200)
+        self.call(
+            self.base and "",
+            "/api/auth/register",
+            "POST",
+            {"username": "pending", "password": "pending-password"},
+        )
+        self.assertEqual(
+            [u["username"] for u in self.app.users.list_users(pending=True)], ["pending"]
+        )
+        status, _ = self.call(self.boss, "/api/admin/users/pending/reject", "DELETE")
+        self.assertEqual(status, 200)
+        self.assertIsNone(self.app.users.get_user("pending"))
+        # A pending account never had history, so the name is reusable.
+        status, _ = self.call(
+            self.boss,
+            "/api/auth/register",
+            "POST",
+            {"username": "pending", "password": "pending-password"},
+        )
+        self.assertEqual(status, 202)
 
 
 if __name__ == "__main__":

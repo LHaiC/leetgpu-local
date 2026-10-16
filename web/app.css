@@ -2236,3 +2236,10 @@ li.CodeMirror-hint-active .leet-hint-doc { color: #071109; }
   border-color: #70433f;
   background: var(--red-soft);
 }
+
+/* Archived account rows in the admin user list. */
+.admin-row.is-deleted { opacity: 0.55; }
+.admin-row.is-deleted .admin-role {
+  color: var(--red);
+  font-size: 11px;
+}

@@ -994,8 +994,18 @@ async function loadAdminUsers() {
   try {
     const data = await api("/api/admin/users");
     elements.adminUsersList.innerHTML = data.users
-      .map(
-        (u) => `
+      .map((u) => {
+        if (u.deleted) {
+          // Tombstone: the name stays reserved, so show why it is unavailable.
+          return `
+        <div class="admin-row is-deleted">
+          <span class="admin-row-main">
+            ${escapeHtml(u.username)}
+            <span class="admin-role" data-i18n="admin.deleted_badge">已删除</span>
+          </span>
+        </div>`;
+        }
+        return `
         <div class="admin-row">
           <span class="admin-row-main">
             ${escapeHtml(u.username)}
@@ -1009,8 +1019,8 @@ async function loadAdminUsers() {
                   title="${I18N.t("admin.delete_user")}">
             <i data-lucide="trash-2"></i>
           </button>
-        </div>`,
-      )
+        </div>`;
+      })
       .join("");
     elements.adminUsersList
       .querySelectorAll("[data-toggle-user]")

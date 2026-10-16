@@ -469,11 +469,7 @@ class ScoreStore:
         return dict(row)
 
     def delete_user_data(self, username: str) -> None:
-        """Drop a deleted account's leaderboard rows.
-
-        Keeping them would let a later account with the same name inherit the
-        old scores.
-        """
+        """Drop a deleted account's leaderboard rows and submission history."""
         with closing(self._connect()) as connection:
             with connection:
                 connection.execute("DELETE FROM scores WHERE username = ?", (username,))
@@ -600,6 +596,8 @@ class MultiuserStore:
                         role TEXT NOT NULL DEFAULT 'user',
                         disabled INTEGER NOT NULL DEFAULT 0,
                         approved INTEGER NOT NULL DEFAULT 1,
+                        deleted INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
                         created_at TEXT NOT NULL
                     )
                     """
@@ -611,6 +609,12 @@ class MultiuserStore:
                     connection.execute(
                         "ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 1"
                     )
+                if "deleted" not in columns:
+                    connection.execute(
+                        "ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0"
+                    )
+                if "deleted_at" not in columns:
+                    connection.execute("ALTER TABLE users ADD COLUMN deleted_at TEXT")
                 connection.execute(
                     """
                     CREATE TABLE IF NOT EXISTS sessions (
@@ -669,6 +673,14 @@ class MultiuserStore:
             raise ApiError("Username must be 2-32 characters: letters, digits, _ . -", code="username_format")
         if len(password) < 6:
             raise ApiError("Password must be at least 6 characters", code="password_short")
+        existing = self.get_user(username)
+        if existing is not None:
+            if existing["deleted"]:
+                raise ApiError(
+                    "This name belonged to a deleted account and stays reserved",
+                    code="username_retired",
+                )
+            raise ApiError("Username already taken", code="username_taken")
         with closing(self._connect()) as connection:
             with connection:
                 try:
@@ -690,8 +702,8 @@ class MultiuserStore:
     def get_user(self, username: str) -> Optional[Dict[str, Any]]:
         with closing(self._connect()) as connection:
             row = connection.execute(
-                "SELECT username, role, disabled, approved, created_at FROM users "
-                "WHERE username = ?",
+                "SELECT username, role, disabled, approved, deleted, deleted_at, created_at "
+                "FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
         return dict(row) if row else None
@@ -699,11 +711,11 @@ class MultiuserStore:
     def verify_login(self, username: str, password: str) -> Optional[Dict[str, Any]]:
         with closing(self._connect()) as connection:
             row = connection.execute(
-                "SELECT username, password_hash, role, disabled, approved FROM users "
-                "WHERE username = ?",
+                "SELECT username, password_hash, role, disabled, approved, deleted "
+                "FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
-        if row is None or row["disabled"]:
+        if row is None or row["disabled"] or row["deleted"]:
             return None
         if not verify_password(password, row["password_hash"]):
             return None
@@ -712,10 +724,13 @@ class MultiuserStore:
         return {"username": row["username"], "role": row["role"]}
 
     def list_users(self, pending: Optional[bool] = None) -> List[Dict[str, Any]]:
-        query = "SELECT username, role, disabled, approved, created_at FROM users"
+        query = (
+            "SELECT username, role, disabled, approved, deleted, deleted_at, created_at "
+            "FROM users"
+        )
         params: tuple = ()
         if pending is not None:
-            query += " WHERE approved = ?"
+            query += " WHERE approved = ? AND deleted = 0"
             params = (0 if pending else 1,)
         query += " ORDER BY created_at"
         with closing(self._connect()) as connection:
@@ -776,20 +791,24 @@ class MultiuserStore:
     def admin_count(self) -> int:
         with closing(self._connect()) as connection:
             row = connection.execute(
-                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0"
+                "SELECT COUNT(*) FROM users "
+                "WHERE role = 'admin' AND disabled = 0 AND deleted = 0"
             ).fetchone()
         return int(row[0])
 
     def delete_user(self, username: str) -> bool:
-        """Remove the account plus its sessions and saved drafts.
+        """Delete an account and its data, keeping the name permanently retired.
 
-        The last active admin cannot be deleted: that would lock everyone out of
-        administration. Leaderboard rows live in a different database and are
-        removed by ScoreStore.delete_user_data() — WebApplication.delete_user()
-        orchestrates both.
+        Everything personal goes: credentials, sessions and saved drafts. The
+        leaderboard rows are removed by ScoreStore.delete_user_data() (they live
+        in a different database), so WebApplication.delete_user() orchestrates
+        both. Only a tombstone row survives, so the name can never be registered
+        again — that prevents a later account from impersonating a former member
+        or inheriting their standing. The last active admin cannot be deleted:
+        that would lock everyone out of administration.
         """
         user = self.get_user(username)
-        if user is None:
+        if user is None or user["deleted"]:
             return False
         if user["role"] == "admin" and not user["disabled"] and self.admin_count() <= 1:
             raise ApiError(
@@ -800,7 +819,13 @@ class MultiuserStore:
         with closing(self._connect()) as connection:
             with connection:
                 connection.execute(
-                    "DELETE FROM users WHERE username = ?", (username,)
+                    """
+                    UPDATE users
+                       SET deleted = 1, deleted_at = ?, disabled = 1, approved = 0,
+                           role = 'user', password_hash = ?
+                     WHERE username = ?
+                    """,
+                    (utc_now(), hash_password(secrets.token_urlsafe(32)), username),
                 )
                 connection.execute(
                     "DELETE FROM sessions WHERE username = ?", (username,)
@@ -809,6 +834,25 @@ class MultiuserStore:
                     "DELETE FROM user_solutions WHERE username = ?", (username,)
                 )
         return True
+
+    def purge_user(self, username: str) -> bool:
+        """Hard-delete an account with no history (a rejected registration).
+
+        Unlike delete_user this frees the name, which is safe because a pending
+        account could never submit anything.
+        """
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "DELETE FROM users WHERE username = ?", (username,)
+                )
+                connection.execute(
+                    "DELETE FROM sessions WHERE username = ?", (username,)
+                )
+                connection.execute(
+                    "DELETE FROM user_solutions WHERE username = ?", (username,)
+                )
+                return cursor.rowcount > 0
 
     def change_password(self, username: str, old: str, new: str) -> bool:
         user = self.verify_login(username, old)
@@ -852,13 +896,13 @@ class MultiuserStore:
         with closing(self._connect()) as connection:
             row = connection.execute(
                 """
-                SELECT u.username, u.role, u.disabled FROM sessions s
+                SELECT u.username, u.role, u.disabled, u.deleted FROM sessions s
                 JOIN users u ON u.username = s.username
                 WHERE s.token_hash = ? AND s.expires_at > ?
                 """,
                 (self._token_hash(token), utc_now()),
             ).fetchone()
-        if row is None or row["disabled"]:
+        if row is None or row["disabled"] or row["deleted"]:
             return None
         return {"username": row["username"], "role": row["role"]}
 
@@ -1438,7 +1482,7 @@ class WebApplication:
         return self.share_solutions()
 
     def delete_user(self, username: str) -> bool:
-        """Delete an account and everything belonging to it, across both stores."""
+        """Delete an account and all of its data, across both databases."""
         if not self.users.delete_user(username):
             return False
         self.scores.delete_user_data(username)
@@ -1559,6 +1603,28 @@ class RequestHandler(BaseHTTPRequestHandler):
             attachment_name=path.name if attachment else None,
         )
 
+    def _content_length(self) -> int:
+        try:
+            return max(0, int(self.headers.get("Content-Length") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _drain_body(self) -> None:
+        """Consume any request body the handler did not read.
+
+        With HTTP/1.1 keep-alive the next request is parsed from the same socket,
+        so leftover bytes would be read as a request line — which shows up as
+        `501 Unsupported method ('{}GET')` after a POST whose body was ignored
+        (logout sends `{}` and never reads it).
+        """
+        remaining = self._content_length() - getattr(self, "_body_consumed", 0)
+        if remaining > 0:
+            try:
+                self.rfile.read(remaining)
+            except OSError:
+                pass
+        self._body_consumed = self._content_length()
+
     def read_json(self) -> Dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -1566,8 +1632,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             raise ValueError("Invalid Content-Length") from exc
         if length <= 0 or length > MAX_SOURCE_BYTES + 64 * 1024:
             raise ValueError("Request body is empty or too large")
+        raw = self.rfile.read(length)
+        self._body_consumed = getattr(self, "_body_consumed", 0) + len(raw)
         try:
-            value = json.loads(self.rfile.read(length).decode("utf-8"))
+            value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError("Request body must be UTF-8 JSON") from exc
         if not isinstance(value, dict):
@@ -1644,6 +1712,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlsplit(self.path)
         query = parse_qs(parsed.query)
+        self._body_consumed = 0
         try:
             if parsed.path == "/api/me":
                 user = self.current_user()
@@ -1795,9 +1864,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             LOGGER.exception("GET %s failed", self.path)
             self.send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        finally:
+            self._drain_body()
 
     def do_POST(self) -> None:
         parsed = urlsplit(self.path)
+        self._body_consumed = 0
         try:
             if parsed.path == "/api/auth/register":
                 body = self.read_json()
@@ -1983,9 +2055,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             LOGGER.exception("POST %s failed", self.path)
             self.send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        finally:
+            self._drain_body()
 
     def do_DELETE(self) -> None:
         parsed = urlsplit(self.path)
+        self._body_consumed = 0
         try:
             parts = parsed.path.strip("/").split("/")
             if len(parts) == 3 and parts[:2] == ["api", "leaderboard"]:
@@ -2019,8 +2094,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                         {"approved": self.app.users.set_approved(target, True)}
                     )
                 elif action == "reject":
+                    # Rejecting a pending registration is a hard delete: the
+                    # account never had any history to preserve.
                     self.send_json(
-                        {"rejected": self.app.users.delete_user(target)}
+                        {"rejected": self.app.users.purge_user(target)}
                     )
                 else:
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown user action")
@@ -2045,6 +2122,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             LOGGER.exception("DELETE %s failed", self.path)
             self.send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        finally:
+            self._drain_body()
 
 
 class ApplicationServer(ThreadingHTTPServer):
