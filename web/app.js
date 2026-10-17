@@ -285,7 +285,11 @@ function saveDraft() {
   if (pending.key !== state.currentKey || pending.language !== state.language) return;
 
   const source = editor.getValue();
-  localStorage.setItem(draftKeyFor(pending.key, pending.language), source);
+  const localKey = draftKeyFor(pending.key, pending.language);
+  localStorage.setItem(localKey, source);
+  // Mark the copy as "not yet confirmed by the server" so a reload can tell a
+  // pending edit apart from a stale leftover (see loadCode).
+  localStorage.setItem(`${localKey}.dirty`, "1");
   elements.draftState.textContent = "saved";
   if (session.user) {
     api("/api/solutions", {
@@ -295,7 +299,9 @@ function saveDraft() {
         language: pending.language,
         source,
       }),
-    }).catch(() => {});
+    })
+      .then(() => localStorage.removeItem(`${localKey}.dirty`))
+      .catch(() => {});
   }
 }
 
@@ -353,17 +359,45 @@ function toggleLineComments() {
 }
 
 async function loadCode() {
-  const local = localStorage.getItem(draftKey());
+  const localKey = draftKey();
+  const local = localStorage.getItem(localKey);
+  const dirty = localStorage.getItem(`${localKey}.dirty`) === "1";
   let server = null;
+  let serverKnown = false;
   if (session.user) {
     try {
       const data = await api(
         `/api/solution?challenge=${encodeURIComponent(state.currentKey)}&language=${encodeURIComponent(state.language)}`,
       );
       server = data.source;
+      serverKnown = true;
     } catch {}
   }
-  const source = server ?? local ?? currentStarter();
+
+  // For a signed-in user the server is authoritative. If it reports no draft and
+  // the local copy is not a pending edit, that copy is a leftover (e.g. written by
+  // the old cross-challenge autosave bug) and must be dropped, or it would keep
+  // shadowing the starter and could be re-uploaded.
+  let source;
+  let origin;
+  let uploadLocal = false;
+  if (server) {
+    source = server;
+    origin = "server";
+    localStorage.setItem(localKey, server);
+    localStorage.removeItem(`${localKey}.dirty`);
+  } else if (serverKnown && !dirty) {
+    if (local !== null) localStorage.removeItem(localKey);
+    source = currentStarter();
+    origin = "starter";
+  } else if (local !== null) {
+    source = local;
+    origin = "saved";
+    uploadLocal = serverKnown && dirty;
+  } else {
+    source = currentStarter();
+    origin = "starter";
+  }
   if (editor) {
     state.loadingCode = true;
     try {
@@ -375,11 +409,15 @@ async function loadCode() {
       state.loadingCode = false;
     }
   }
-  elements.draftState.textContent =
-    server !== null ? "server" : local === null ? "starter" : "saved";
+  elements.draftState.textContent = origin;
   elements.solutionFilename.textContent = filenames[state.language];
   updateSubmitAvailability();
   updateHistoryButtons();
+  // A pending offline edit never reached the server; push it now.
+  if (uploadLocal) {
+    state.pendingSave = { key: state.currentKey, language: state.language };
+    saveDraft();
+  }
 }
 
 function renderChallengeList() {
@@ -1234,6 +1272,7 @@ elements.resetCode.addEventListener("click", async () => {
   clearTimeout(state.saveTimer);
   state.pendingSave = null;
   localStorage.removeItem(draftKeyFor(key, language));
+  localStorage.removeItem(`${draftKeyFor(key, language)}.dirty`);
   if (session.user) {
     // Drop the server draft too, or it would come back on the next load.
     await api(
