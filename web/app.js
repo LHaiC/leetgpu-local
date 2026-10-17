@@ -240,14 +240,18 @@ async function logout() {
   }
 }
 
-async function refreshSession() {
-  const me = await api("/api/me");
+function applySession(me) {
   session.user = me.user;
   session.authRequired = me.auth_required;
   session.registrationOpen = me.registration_open;
   session.registrationMode = me.registration_mode;
+  session.shareSolutions = me.share_solutions;
   if (me.site_name) applySiteName(me.site_name);
   renderAuthState();
+}
+
+async function refreshSession() {
+  applySession(await api("/api/me"));
 }
 
 function applySiteName(name) {
@@ -361,13 +365,18 @@ function toggleLineComments() {
   if (editor) editor.execCommand("toggleComment");
 }
 
-async function loadCode() {
+async function loadCode(prefetched) {
   const localKey = draftKey();
   const local = localStorage.getItem(localKey);
   const dirty = localStorage.getItem(`${localKey}.dirty`) === "1";
   let server = null;
   let serverKnown = false;
-  if (session.user) {
+  if (prefetched && session.user) {
+    // Only signed-in users have a server-side draft; in anonymous mode
+    // localStorage *is* the store, so the prefetched null must not wipe it.
+    server = prefetched.source ?? null;
+    serverKnown = true;
+  } else if (session.user) {
     try {
       const data = await api(
         `/api/solution?challenge=${encodeURIComponent(state.currentKey)}&language=${encodeURIComponent(state.language)}`,
@@ -401,6 +410,16 @@ async function loadCode() {
     source = currentStarter();
     origin = "starter";
   }
+  applySource(source, origin);
+  // A pending offline edit never reached the server; push it now.
+  if (uploadLocal) {
+    state.pendingSave = { key: state.currentKey, language: state.language };
+    saveDraft();
+  }
+}
+
+/** Put a source buffer into the editor without triggering an autosave. */
+function applySource(source, origin) {
   if (editor) {
     state.loadingCode = true;
     try {
@@ -416,11 +435,6 @@ async function loadCode() {
   elements.solutionFilename.textContent = filenames[state.language];
   updateSubmitAvailability();
   updateHistoryButtons();
-  // A pending offline edit never reached the server; push it now.
-  if (uploadLocal) {
-    state.pendingSave = { key: state.currentKey, language: state.language };
-    saveDraft();
-  }
 }
 
 function renderChallengeList() {
@@ -494,6 +508,18 @@ async function selectChallenge(key) {
   }
 }
 
+function applySystem(system) {
+  if (!system) return;
+  state.system = system;
+  const label = elements.systemStatus.querySelector(".system-name");
+  if (system.available) {
+    elements.systemStatus.classList.add("ready");
+    label.textContent = `${system.gpu} · ${Math.round(system.memory_mb / 1024)} GB`;
+  } else {
+    label.textContent = I18N.t("sys.gpu_unavailable");
+  }
+}
+
 function applyDetail() {
   const detail = state.detail;
   if (!detail) return;
@@ -518,7 +544,7 @@ function ensureAvailableLanguage() {
   localStorage.setItem("leetgpu.language", fallback);
 }
 
-function setLanguage(language) {
+function setLanguage(language, prefetched) {
   if (!filenames[language]) return;
   flushDraftSave();
   state.language = language;
@@ -529,7 +555,7 @@ function setLanguage(language) {
     button.disabled = state.detail ? !available : false;
   });
   if (editorApi) editorApi.setLanguage(language);
-  loadCode();
+  loadCode(prefetched);
 }
 
 function setView(view) {
@@ -811,7 +837,15 @@ async function loadLeaderboard() {
     const data = await api(
       `/api/leaderboard?challenge=${encodeURIComponent(state.currentKey)}&language=${encodeURIComponent(language)}`,
     );
-    elements.leaderboardBody.innerHTML = data.scores
+    renderLeaderboard(data.scores);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+function renderLeaderboard(scores) {
+  {
+    elements.leaderboardBody.innerHTML = scores
       .map((score) => {
         const mine =
           session.user &&
@@ -845,10 +879,8 @@ async function loadLeaderboard() {
         deleteSubmission(button.dataset.deleteJob);
       });
     });
-    elements.leaderboardEmpty.classList.toggle("hidden", data.scores.length > 0);
+    elements.leaderboardEmpty.classList.toggle("hidden", scores.length > 0);
     refreshIcons();
-  } catch (error) {
-    toast(error.message, "error");
   }
 }
 
@@ -1023,22 +1055,25 @@ async function selectShared(username) {
 
 // ---------- announcements & admin ----------
 
+function renderAnnouncements(items) {
+  elements.announcementsBar.classList.toggle("hidden", items.length === 0);
+  elements.announcementsBar.innerHTML = items
+    .slice(0, 3)
+    .map(
+      (a) => `
+      <div class="announcement">
+        <span class="announcement-title">${escapeHtml(a.title)}</span>
+        <span class="announcement-body">${escapeHtml(a.body)}</span>
+        <span class="announcement-meta">${escapeHtml(a.author)} · ${new Date(a.created_at).toLocaleDateString()}</span>
+      </div>`,
+    )
+    .join("");
+}
+
 async function loadAnnouncements() {
   try {
     const data = await api("/api/announcements");
-    const items = data.announcements || [];
-    elements.announcementsBar.classList.toggle("hidden", items.length === 0);
-    elements.announcementsBar.innerHTML = items
-      .slice(0, 3)
-      .map(
-        (a) => `
-        <div class="announcement">
-          <span class="announcement-title">${escapeHtml(a.title)}</span>
-          <span class="announcement-body">${escapeHtml(a.body)}</span>
-          <span class="announcement-meta">${escapeHtml(a.author)} · ${new Date(a.created_at).toLocaleDateString()}</span>
-        </div>`,
-      )
-      .join("");
+    renderAnnouncements(data.announcements || []);
   } catch {}
 }
 
@@ -1218,38 +1253,48 @@ pollGpu();
 async function initialize() {
   refreshIcons();
   elements.runnerName.value = localStorage.getItem("leetgpu.runner") || "local";
-  // One round trip instead of three: every endpoint here resolves the session
-  // from the cookie on its own, so they can run concurrently. This matters on a
-  // slow link, where each request costs a tunnel round trip.
-  const [, challengeData, system] = await Promise.all([
-    refreshSession().catch(() => null),
-    api("/api/challenges").catch(() => null),
-    api("/api/system").catch(() => null),
-  ]);
-  loadAnnouncements();
+
+  // The whole first screen in a single round trip: session, challenge list, GPU
+  // info, announcements, the opening problem, its saved draft and its
+  // leaderboard. On a slow link every extra request is another tunnel round trip.
+  const savedChallenge = localStorage.getItem("leetgpu.challenge") || "";
+  const savedLanguage = localStorage.getItem("leetgpu.language") || state.language;
+  let boot;
+  try {
+    boot = await api(
+      `/api/bootstrap?challenge=${encodeURIComponent(savedChallenge)}` +
+        `&language=${encodeURIComponent(savedLanguage)}`,
+    );
+  } catch (error) {
+    toast(error.message, "error");
+    return;
+  }
+
+  applySession(boot);
+  renderAnnouncements(boot.announcements || []);
   if (session.authRequired && !session.user) {
     openAuthModal();
     return;
   }
-  try {
-    if (!challengeData || !system) throw new Error("Failed to load the challenge list");
-    state.system = system;
-    state.challenges = challengeData.challenges;
-    if (system.available) {
-      elements.systemStatus.classList.add("ready");
-      elements.systemStatus.querySelector(".system-name").textContent =
-        `${system.gpu} · ${Math.round(system.memory_mb / 1024)} GB`;
-    } else {
-      elements.systemStatus.querySelector(".system-name").textContent = I18N.t("sys.gpu_unavailable");
-    }
-    renderChallengeList();
-    const saved = localStorage.getItem("leetgpu.challenge");
-    const initial = state.challenges.some((item) => item.key === saved)
-      ? saved
-      : state.challenges[0]?.key;
-    await selectChallenge(initial);
-  } catch (error) {
-    toast(error.message, "error");
+
+  applySystem(boot.system);
+  state.challenges = boot.challenges || [];
+  renderChallengeList();
+  if (!boot.detail) {
+    toast(I18N.t("misc.error"), "error");
+    return;
+  }
+
+  // The server already resolved a language that has a starter for this problem.
+  state.currentKey = boot.detail.key;
+  state.detail = boot.detail;
+  state.language = boot.language || state.language;
+  localStorage.setItem("leetgpu.challenge", state.currentKey);
+  applyDetail();
+  setLanguage(state.language, boot.solution);
+  renderLeaderboard(boot.leaderboard || []);
+  if (window.MathJax?.typesetPromise) {
+    window.MathJax.typesetPromise([elements.problemBody]).catch(() => {});
   }
 }
 

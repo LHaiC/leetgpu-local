@@ -1553,15 +1553,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
 
-    def send_json(self, value: Any, status: int = HTTPStatus.OK) -> None:
-        body = json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")
-        self.send_response(status)
-        self._security_headers()
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
 
     def send_error_json(self, status: int, message: str, code: Optional[str] = None) -> None:
         payload: Dict[str, Any] = {"error": message}
@@ -1576,9 +1567,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         self,
         body: bytes,
         content_type: str,
+        status: int = HTTPStatus.OK,
         cache_control: Optional[str] = None,
         etag: Optional[str] = None,
         attachment_name: Optional[str] = None,
+        cookie: Optional[str] = None,
     ) -> None:
         """Single funnel for byte responses: ETag/304, gzip and length headers."""
         if etag and self.headers.get("If-None-Match") == etag:
@@ -1598,10 +1591,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             body = gzip.compress(body, 6)
             compressed = True
 
-        self.send_response(HTTPStatus.OK)
+        self.send_response(status)
         self._security_headers()
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", cache_control or "no-store")
+        if cookie is not None:
+            self.set_session_cookie(cookie)
         if etag:
             self.send_header("ETag", etag)
         if compressed:
@@ -1658,6 +1653,57 @@ class RequestHandler(BaseHTTPRequestHandler):
             except OSError:
                 pass
         self._body_consumed = self._content_length()
+
+    def bootstrap_payload(self, query: Mapping[str, List[str]]) -> Dict[str, Any]:
+        """Everything the first screen needs, in one round trip.
+
+        The client used to make three dependent calls (session, challenge list,
+        then the problem detail and its saved solution); each costs a tunnel round
+        trip, which dominated first paint on a slow link.
+        """
+        user = self.current_user()
+        payload: Dict[str, Any] = {
+            "user": user,
+            "auth_required": self.app.auth_required,
+            "registration_open": self.app.registration_open(),
+            "registration_mode": self.app.registration_mode(),
+            "maintenance": self.app.users.site_setting("maintenance") == "1",
+            "share_solutions": self.app.share_solutions(),
+            "site_name": self.app.site_name,
+            "system": self.app.system,
+            "announcements": self.app.users.announcements(),
+            "challenges": None,
+            "detail": None,
+            "solution": None,
+            "leaderboard": None,
+        }
+        if self.app.auth_required and user is None:
+            return payload
+
+        username = user["username"] if user else ""
+        challenges = self.app.challenge_list(username)
+        payload["challenges"] = challenges
+        if not challenges:
+            return payload
+
+        requested = query.get("challenge", [""])[0]
+        key = requested if any(item["key"] == requested for item in challenges) else challenges[0]["key"]
+        language = query.get("language", [""])[0]
+        if language not in LANGUAGES:
+            language = "cuda"
+        detail = self.app.catalog.detail(key)
+        # Some challenges ship no starter for the requested language; answer with
+        # the first one that exists so the editor is never left empty.
+        if not detail["starters"].get(language):
+            language = next((lang for lang in LANGUAGES if detail["starters"].get(lang)), language)
+        payload["detail"] = detail
+        payload["language"] = language
+        payload["solution"] = {
+            "source": self.app.users.get_solution(username, key, language),
+            "username": username,
+        }
+        payload["leaderboard"] = self.app.scores.leaderboard(key)
+        return payload
 
     def read_json(self) -> Dict[str, Any]:
         try:
@@ -1732,23 +1778,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header("Set-Cookie", "; ".join(attrs))
 
     def send_json(self, value: Any, status: int = HTTPStatus.OK, cookie: Optional[str] = None) -> None:
-        body = json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")
-        self.send_response(status)
-        self._security_headers()
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        if cookie is not None:
-            self.set_session_cookie(cookie)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self.send_body(
+            json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"),
+            "application/json; charset=utf-8",
+            status=status,
+            cookie=cookie,
+        )
 
     def do_GET(self) -> None:
         parsed = urlsplit(self.path)
         query = parse_qs(parsed.query)
         self._body_consumed = 0
         try:
-            if parsed.path == "/api/me":
+            if parsed.path == "/api/bootstrap":
+                self.send_json(self.bootstrap_payload(query))
+            elif parsed.path == "/api/me":
                 user = self.current_user()
                 self.send_json({
                     "user": user,
