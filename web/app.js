@@ -114,6 +114,8 @@ const state = {
   pollTimer: null,
   saveTimer: null,
   running: false,
+  loadingCode: false,
+  pendingSave: null,
   selectedSubmission: null,
 };
 
@@ -253,29 +255,54 @@ function applySiteName(name) {
   });
 }
 
+function draftKeyFor(key, language) {
+  return `leetgpu.draft.${key}.${language}`;
+}
+
 function draftKey() {
-  return `leetgpu.draft.${state.currentKey}.${state.language}`;
+  return draftKeyFor(state.currentKey, state.language);
 }
 
 function currentStarter() {
   return state.detail?.starters?.[state.language] || "";
 }
 
+/**
+ * Persist the editor buffer under the challenge/language it was *edited* for.
+ *
+ * The debounce used to read `state.currentKey` when the timer fired, so clicking
+ * through the challenge list within the debounce window wrote the previous
+ * buffer into the newly opened challenge. The identity is now captured at edit
+ * time, and a switch flushes the pending write first.
+ */
 function saveDraft() {
-  if (!state.currentKey || !editor) return;
+  const pending = state.pendingSave;
+  state.pendingSave = null;
+  clearTimeout(state.saveTimer);
+  if (!pending || !editor) return;
+  // A switch that skipped the flush would mean the buffer now belongs to another
+  // challenge; writing it here is exactly the corruption we are guarding against.
+  if (pending.key !== state.currentKey || pending.language !== state.language) return;
+
   const source = editor.getValue();
-  localStorage.setItem(draftKey(), source);
+  localStorage.setItem(draftKeyFor(pending.key, pending.language), source);
   elements.draftState.textContent = "saved";
   if (session.user) {
     api("/api/solutions", {
       method: "POST",
       body: JSON.stringify({
-        challenge: state.currentKey,
-        language: state.language,
+        challenge: pending.key,
+        language: pending.language,
         source,
       }),
     }).catch(() => {});
   }
+}
+
+/** Write any pending draft immediately, while the buffer still belongs to it. */
+function flushDraftSave() {
+  if (state.pendingSave) saveDraft();
+  else clearTimeout(state.saveTimer);
 }
 
 /** Submit/Test are only usable with a non-empty buffer and no job in flight. */
@@ -310,6 +337,10 @@ function redoEditor() {
 
 function recordEditorEdit() {
   if (!editor) return;
+  // Loading a challenge into the editor fires `change` too; autosaving that
+  // would turn "opened the problem" into "saved a draft".
+  if (state.loadingCode) return;
+  state.pendingSave = { key: state.currentKey, language: state.language };
   elements.draftState.textContent = "edited";
   updateSubmitAvailability();
   updateHistoryButtons();
@@ -334,10 +365,15 @@ async function loadCode() {
   }
   const source = server ?? local ?? currentStarter();
   if (editor) {
-    editor.setValue(source);
-    editor.clearHistory();
-    editor.setCursor({ line: 0, ch: 0 });
-    editor.scrollTo(0, 0);
+    state.loadingCode = true;
+    try {
+      editor.setValue(source);
+      editor.clearHistory();
+      editor.setCursor({ line: 0, ch: 0 });
+      editor.scrollTo(0, 0);
+    } finally {
+      state.loadingCode = false;
+    }
   }
   elements.draftState.textContent =
     server !== null ? "server" : local === null ? "starter" : "saved";
@@ -386,6 +422,9 @@ async function selectChallenge(key) {
     applyDetail();
     return;
   }
+  // Save the outgoing challenge's edits before the identity changes, otherwise
+  // the pending debounce would write them under the new key.
+  flushDraftSave();
   const firstLoad = !state.detail;
   state.currentKey = key;
   localStorage.setItem("leetgpu.challenge", key);
@@ -440,6 +479,7 @@ function ensureAvailableLanguage() {
 
 function setLanguage(language) {
   if (!filenames[language]) return;
+  flushDraftSave();
   state.language = language;
   localStorage.setItem("leetgpu.language", language);
   elements.languageSwitch.querySelectorAll("button").forEach((button) => {
@@ -1187,10 +1227,21 @@ elements.viewTabs.querySelectorAll("button").forEach((button) => {
 // Editor is created after DOM ready; see createEditor() near the bottom.
 elements.undoCode.addEventListener("click", undoEditor);
 elements.redoCode.addEventListener("click", redoEditor);
-elements.resetCode.addEventListener("click", () => {
+elements.resetCode.addEventListener("click", async () => {
   if (!window.confirm(I18N.t("editor.confirm_reset"))) return;
-  localStorage.removeItem(draftKey());
-  loadCode();
+  const key = state.currentKey;
+  const language = state.language;
+  clearTimeout(state.saveTimer);
+  state.pendingSave = null;
+  localStorage.removeItem(draftKeyFor(key, language));
+  if (session.user) {
+    // Drop the server draft too, or it would come back on the next load.
+    await api(
+      `/api/solutions?challenge=${encodeURIComponent(key)}&language=${encodeURIComponent(language)}`,
+      { method: "DELETE" },
+    ).catch(() => {});
+  }
+  await loadCode();
 });
 elements.testButton.addEventListener("click", () => submitRun("test"));
 elements.runButton.addEventListener("click", () => submitRun("submit"));

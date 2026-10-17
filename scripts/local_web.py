@@ -985,6 +985,16 @@ class MultiuserStore:
                     (username, challenge_key, language, source, utc_now()),
                 )
 
+    def delete_solution(self, username: str, challenge_key: str, language: str) -> bool:
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    "DELETE FROM user_solutions "
+                    "WHERE username = ? AND challenge_key = ? AND language = ?",
+                    (username, challenge_key, language),
+                )
+                return cursor.rowcount > 0
+
     def get_solution(
         self, username: str, challenge_key: str, language: str
     ) -> Optional[str]:
@@ -2101,6 +2111,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                     )
                 else:
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown user action")
+            elif len(parts) == 2 and parts == ["api", "solutions"]:
+                user = self.require_user()
+                query = parse_qs(urlsplit(self.path).query)
+                challenge = query.get("challenge", [""])[0]
+                language = query.get("language", [""])[0]
+                self.app.catalog.require(challenge)
+                if language not in LANGUAGES:
+                    raise ValueError("Invalid language")
+                self.send_json({
+                    "deleted": self.app.users.delete_solution(
+                        user["username"], challenge, language
+                    )
+                })
             elif len(parts) == 4 and parts[:3] == ["api", "admin", "users"]:
                 self.require_admin()
                 if not self.app.delete_user(parts[3]):

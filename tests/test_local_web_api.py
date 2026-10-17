@@ -283,6 +283,32 @@ class SharedSolutionAccessTest(unittest.TestCase):
         status, _ = self.call("", "/api/solution?challenge=easy/1_synthetic_addition&language=cuda")
         self.assertEqual(status, 401)
 
+    def test_resetting_a_draft_deletes_only_that_draft(self):
+        challenge = "easy/1_synthetic_addition"
+        for language in ("cuda", "triton"):
+            self.call(
+                self.carol,
+                "/api/solutions",
+                "POST",
+                {"challenge": challenge, "language": language, "source": "// draft"},
+            )
+        status, payload = self.call(
+            self.carol,
+            f"/api/solutions?challenge={challenge}&language=cuda",
+            "DELETE",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["deleted"])
+        _, after = self.call(
+            self.carol, f"/api/solution?challenge={challenge}&language=cuda"
+        )
+        self.assertIsNone(after["source"])
+        # The other language's draft is untouched.
+        _, other = self.call(
+            self.carol, f"/api/solution?challenge={challenge}&language=triton"
+        )
+        self.assertEqual(other["source"], "// draft")
+
     def test_unread_request_body_does_not_corrupt_the_next_request(self):
         """HTTP/1.1 keep-alive reuses the socket, so a POST whose body the
         handler ignores (logout sends '{}') must still be drained — otherwise
