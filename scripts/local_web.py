@@ -1391,6 +1391,24 @@ class JobManager:
         ]
 
 
+def asset_version(web_root: Path) -> str:
+    """Fingerprint of everything served from /static.
+
+    The HTML references assets as `/static/x.js?v=<fingerprint>`; a request whose
+    version matches may be cached immutably (by the browser and by Cloudflare),
+    which keeps the ~20 assets off the origin on every load. A deploy changes the
+    fingerprint, so the URLs change and nothing goes stale.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(web_root.rglob("*")):
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        digest.update(path.relative_to(web_root).as_posix().encode())
+        digest.update(f"{stat.st_size}:{stat.st_mtime_ns}".encode())
+    return digest.hexdigest()[:12]
+
+
 def system_info() -> Dict[str, Any]:
     command = [
         "nvidia-smi",
@@ -1473,6 +1491,7 @@ class WebApplication:
             sandbox=sandbox, judge_image=judge_image, sandbox_timeout=sandbox_timeout,
         )
         self.system = system_info()
+        self.asset_version = asset_version(self.web_root)
 
     def registration_mode(self) -> str:
         if self.users.user_count() == 0:
@@ -1597,7 +1616,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_file(self, path: Path, attachment: bool = False) -> None:
+    def send_file(
+        self,
+        path: Path,
+        attachment: bool = False,
+        cache_control: Optional[str] = None,
+    ) -> None:
         if not path.is_file():
             self.send_error_json(HTTPStatus.NOT_FOUND, "File not found")
             return
@@ -1608,7 +1632,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_body(
             path.read_bytes(),
             mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-            cache_control="no-cache",
+            cache_control=cache_control or "no-cache",
             etag=etag,
             attachment_name=path.name if attachment else None,
         )
@@ -1846,14 +1870,26 @@ class RequestHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Unknown API path")
             elif parsed.path in {"/", "/index.html"}:
-                self.send_file(self.app.web_root / "index.html")
+                html = (self.app.web_root / "index.html").read_text(encoding="utf-8")
+                html = html.replace("{{ASSET_VERSION}}", self.app.asset_version)
+                self.send_body(
+                    html.encode("utf-8"),
+                    "text/html; charset=utf-8",
+                    cache_control="no-cache",
+                )
             elif parsed.path.startswith("/static/"):
                 relative = unquote(parsed.path[len("/static/"):])
                 root = self.app.web_root.resolve()
                 target = (root / relative).resolve()
                 # Allow subdirectories (vendor/, …) but never escape web_root.
                 if target != root and root in target.parents and target.is_file():
-                    self.send_file(target)
+                    requested = parse_qs(parsed.query).get("v", [""])[0]
+                    cache = (
+                        "public, max-age=31536000, immutable"
+                        if requested == self.app.asset_version
+                        else "no-cache"
+                    )
+                    self.send_file(target, cache_control=cache)
                 else:
                     self.send_error_json(HTTPStatus.NOT_FOUND, "Not found")
             else:

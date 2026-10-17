@@ -188,6 +188,9 @@ function renderAuthState() {
 }
 
 function openAuthModal(mode = "login") {
+  // showModal() throws if the dialog is already open, and a 401 from the
+  // parallel bootstrap can race with this call.
+  if (elements.authModal.open) return;
   session.authMode = mode;
   elements.authModalTitle.textContent = I18N.t(mode === "login" ? "auth.login" : "auth.register");
   elements.authSubmit.textContent = I18N.t(mode === "login" ? "auth.login" : "auth.register");
@@ -1215,17 +1218,21 @@ pollGpu();
 async function initialize() {
   refreshIcons();
   elements.runnerName.value = localStorage.getItem("leetgpu.runner") || "local";
-  await refreshSession().catch(() => {});
+  // One round trip instead of three: every endpoint here resolves the session
+  // from the cookie on its own, so they can run concurrently. This matters on a
+  // slow link, where each request costs a tunnel round trip.
+  const [, challengeData, system] = await Promise.all([
+    refreshSession().catch(() => null),
+    api("/api/challenges").catch(() => null),
+    api("/api/system").catch(() => null),
+  ]);
+  loadAnnouncements();
   if (session.authRequired && !session.user) {
     openAuthModal();
     return;
   }
-  loadAnnouncements();
   try {
-    const [challengeData, system] = await Promise.all([
-      api("/api/challenges"),
-      api("/api/system"),
-    ]);
+    if (!challengeData || !system) throw new Error("Failed to load the challenge list");
     state.system = system;
     state.challenges = challengeData.challenges;
     if (system.available) {
